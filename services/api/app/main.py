@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 
@@ -12,7 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import get_settings
 from app.db import SessionLocal, init_db
-from app.routers import alerts, briefs, protocols
+from app.routers import alerts, briefs, dashboard, protocols
 from app.services.protocols import ProtocolResearchService
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
@@ -46,10 +47,28 @@ async def lifespan(app: FastAPI):
     scheduler.start()
     logger.info("Scheduler started (monitoring every 30 min)")
 
+    # Warm the DB so the DB-first dashboard has data on first load, but do NOT
+    # await it in the lifespan: the pass fans out to sequential DefiLlama HTTP
+    # calls (up to minutes on a slow network) and blocking here would delay the
+    # port binding and fail readiness probes. Run it as a background task; the
+    # dashboard's live-fallback covers the brief window before it completes.
+    app.state.warmup_task = asyncio.create_task(_warmup(app.state))
+
     yield
 
+    app.state.warmup_task.cancel()
     scheduler.shutdown(wait=False)
     await app.state.http.aclose()
+
+
+async def _warmup(state) -> None:
+    try:
+        await alerts_alert_run(state)
+        logger.info("Startup warm-up pass complete")
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:  # noqa: BLE001 - never let warm-up crash the app
+        logger.warning("Startup warm-up pass failed (will retry on demand): %s", exc)
 
 
 app = FastAPI(
@@ -74,6 +93,7 @@ app.add_middleware(
 app.include_router(protocols.router)
 app.include_router(briefs.router)
 app.include_router(alerts.router)
+app.include_router(dashboard.router)
 
 
 @app.get("/api/health", tags=["meta"])

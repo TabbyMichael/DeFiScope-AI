@@ -35,38 +35,41 @@ export default function TvlChart({
       <AreaChart data={chartData} margin={{ top: 8, right: 8, bottom: 0, left: 8 }}>
         <defs>
           <linearGradient id="tvlFill" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="#34d399" stopOpacity={0.35} />
-            <stop offset="100%" stopColor="#34d399" stopOpacity={0.02} />
+            <stop offset="0%" stopColor="var(--color-emerald-500)" stopOpacity={0.35} />
+            <stop offset="100%" stopColor="var(--color-emerald-500)" stopOpacity={0.02} />
           </linearGradient>
         </defs>
-        <CartesianGrid stroke="#27272a" strokeDasharray="3 3" vertical={false} />
+        <CartesianGrid stroke="var(--border)" strokeDasharray="3 3" vertical={false} />
         <XAxis
           dataKey="label"
-          tick={{ fill: "#71717a", fontSize: 11 }}
+          tick={{ fill: "var(--muted-foreground)", fontSize: 11 }}
           tickLine={false}
-          axisLine={{ stroke: "#3f3f46" }}
+          axisLine={{ stroke: "var(--border)" }}
           minTickGap={40}
         />
         <YAxis
-          tick={{ fill: "#71717a", fontSize: 11 }}
+          tick={{ fill: "var(--muted-foreground)", fontSize: 11 }}
           tickLine={false}
           axisLine={false}
           width={56}
           tickFormatter={(v: number) => shortUsd(v)}
         />
         <Tooltip
+          cursor={{ stroke: "var(--muted-foreground)", strokeOpacity: 0.2 }}
           contentStyle={{
-            background: "#18181b",
-            border: "1px solid #3f3f46",
-            borderRadius: 8,
+            backgroundColor: "var(--popover)",
+            color: "var(--popover-foreground)",
+            border: "1px solid var(--border)",
+            borderRadius: "var(--radius)",
             fontSize: 12,
           }}
+          labelStyle={{ color: "var(--muted-foreground)", marginBottom: 2 }}
           formatter={(value) => [`$${shortUsd(Number(value))}`, "TVL"]}
         />
         <Area
           type="monotone"
           dataKey="tvl"
-          stroke="#34d399"
+          stroke="var(--color-emerald-500)"
           strokeWidth={2}
           fill="url(#tvlFill)"
         />

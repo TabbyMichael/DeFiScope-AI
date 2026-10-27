@@ -18,7 +18,11 @@ from app.analysis import metrics
 from app.config import get_settings
 from app.db import AlertRecord, ProtocolSnapshot
 from app.schemas import Alert
-from app.services.protocols import ProtocolResearchService, ResearchPack
+from app.services.protocols import (
+    ProtocolResearchService,
+    ResearchPack,
+    pack_to_overview,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -114,7 +118,9 @@ def persist_alerts(session: Session, alerts: list[Alert]) -> None:
 
 
 def persist_snapshots(session: Session, packs: list[ResearchPack]) -> None:
-    """Store one observation per protocol per day (skip if already captured)."""
+    """Store one full observation per protocol per day (skip if already
+    captured). Writes the complete normalized overview so the dashboard can
+    render the board straight from the DB without a live DefiLlama call."""
     for pack in packs:
         date = pack.latest_date
         if date is None:
@@ -125,24 +131,59 @@ def persist_snapshots(session: Session, packs: list[ResearchPack]) -> None:
             .first()
         )
         if exists:
+            # Data for this (slug, date) is already captured and DefiLlama's
+            # daily point is immutable, so don't re-insert. But DO refresh the
+            # capture timestamp: the dashboard's staleness check reads
+            # max(captured_at), and leaving it frozen would make every request
+            # after 6h think the board is stale and re-trigger a live crawl.
+            exists.captured_at = datetime.now(timezone.utc)
             continue
+        o = pack_to_overview(pack)
         staking_df = metrics.series_to_frame(pack.detail.staking_history)
         staking = float(staking_df["tvl"].iloc[-1]) if not staking_df.empty else None
         session.add(ProtocolSnapshot(
-            slug=pack.slug, date=date, tvl=pack.latest_tvl, staking_tvl=staking,
-            risk_score=pack.risk.composite_score if pack.risk else None,
-            risk_band=pack.risk.band if pack.risk else None,
+            slug=pack.slug, date=date, name=o.name, category=o.category,
+            tvl=o.tvl, staking_tvl=staking,
+            change_7d=o.change_7d, change_30d=o.change_30d,
+            volatility_30d=o.volatility_30d,
+            top_chain=o.top_chain, top_chain_share=o.top_chain_share,
+            incentive_ratio=o.incentive_ratio, stale_days=o.stale_days,
+            risk_score=o.risk_score, risk_band=o.risk_band,
             captured_at=datetime.now(timezone.utc),
         ))
     session.commit()
 
 
+def backfill_history(session: Session, pack: ResearchPack) -> None:
+    """On the first time we see a slug, seed protocol_snapshots with the full
+    DefiLlama daily TVL series so history charts and sparklines are populated
+    immediately rather than after days of scheduler runs. Derived/risk columns
+    are left null for historical rows (only the latest row needs them)."""
+    df = pack.tvl_df
+    if df is None or df.empty:
+        return
+    has_rows = session.query(ProtocolSnapshot).filter(ProtocolSnapshot.slug == pack.slug).first()
+    if has_rows is not None:
+        return
+    now = datetime.now(timezone.utc)
+    rows = [
+        ProtocolSnapshot(
+            slug=pack.slug, date=str(idx.date()), name=pack.detail.name,
+            tvl=round(float(val), 2), captured_at=now,
+        )
+        for idx, val in df["tvl"].items()
+        if str(idx.date()) != pack.latest_date  # latest handled by persist_snapshots
+    ]
+    session.add_all(rows)
+    session.commit()
+
+
 async def run_monitor(svc: ProtocolResearchService, http, session: Session) -> list[Alert]:
-    """Full monitoring pass: fetch configured protocols, evaluate rules,
-    persist alerts and daily snapshots. Called by the scheduler and the
-    manual trigger endpoint."""
-    settings = get_settings()
-    packs = await svc.get_packs(settings.protocol_slugs, http)
+    """Full monitoring pass: fetch the watchlist (curated + top-of-market auto
+    discovery), evaluate rules, persist alerts and daily snapshots. Called by
+    the scheduler and the manual trigger endpoint."""
+    slugs = await svc.watchlist_slugs(http)
+    packs = await svc.get_packs(slugs, http)
     alerts: list[Alert] = []
     for pack in packs:
         try:
@@ -150,5 +191,7 @@ async def run_monitor(svc: ProtocolResearchService, http, session: Session) -> l
         except Exception as exc:  # noqa: BLE001 - keep monitoring resilient
             logger.warning("Alert evaluation failed for %s: %s", pack.slug, exc)
     persist_alerts(session, alerts)
+    for pack in packs:
+        backfill_history(session, pack)  # seed full history on first sight
     persist_snapshots(session, packs)
     return alerts

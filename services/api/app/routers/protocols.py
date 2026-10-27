@@ -6,7 +6,6 @@ import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request
 
 from app.clients.defillama import DefiLlamaError
-from app.config import get_settings
 from app.schemas import ProtocolOverview, ProtocolResearch
 from app.services.protocols import ProtocolResearchService, pack_to_overview, pack_to_research
 
@@ -27,8 +26,8 @@ async def list_protocols(
     svc: ProtocolResearchService = Depends(research_service),
     http: httpx.AsyncClient = Depends(http_client),
 ):
-    settings = get_settings()
-    packs = await svc.get_packs(settings.protocol_slugs, http)
+    slugs = await svc.watchlist_slugs(http)
+    packs = await svc.get_packs(slugs, http)
     if not packs:
         raise HTTPException(502, "Could not load any protocol data from DefiLlama")
     return [pack_to_overview(p) for p in packs]

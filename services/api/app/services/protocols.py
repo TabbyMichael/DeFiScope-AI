@@ -6,6 +6,7 @@ and brief generation do not hammer the public DefiLlama API.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from dataclasses import dataclass, field
@@ -14,6 +15,7 @@ import httpx
 
 from app.analysis import metrics, scoring
 from app.clients.defillama import DefiLlamaClient, ProtocolDetail, ProtocolSummary
+from app.config import Settings, get_settings
 from app.schemas import ChainShare, ProtocolOverview, ProtocolResearch, TvlPoint
 
 logger = logging.getLogger(__name__)
@@ -48,8 +50,9 @@ class ResearchPack:
 
 
 class ProtocolResearchService:
-    def __init__(self, client: DefiLlamaClient | None = None) -> None:
+    def __init__(self, client: DefiLlamaClient | None = None, settings: Settings | None = None) -> None:
         self.client = client or DefiLlamaClient()
+        self.settings = settings or get_settings()
         self._cache: dict[str, tuple[float, ResearchPack]] = {}
         self._list_cache: tuple[float, dict[str, ProtocolSummary]] | None = None
 
@@ -61,6 +64,39 @@ class ProtocolResearchService:
         index = {s.slug: s for s in summaries}
         self._list_cache = (now, index)
         return index
+
+    async def watchlist_slugs(self, http: httpx.AsyncClient) -> list[str]:
+        """Curated protocols plus the top-N-by-TVL slice of the whole DefiLlama
+        directory (market-wide monitoring). If the directory listing is
+        unreachable we degrade to the curated list rather than failing the
+        monitoring pass."""
+        curated = [s for s in self.settings.default_protocols.split(",") if s.strip()]
+        n = self.settings.market_top_n
+        if n <= 0:
+            return curated
+        try:
+            index = await self._protocol_index(http)
+        except Exception as exc:  # noqa: BLE001 - discovery is best-effort
+            logger.warning("Market discovery failed, tracking curated list only: %s", exc)
+            return curated
+        excluded = self.settings.excluded_category_set
+        excluded_slugs = self.settings.excluded_slug_set
+        ranked = sorted(
+            (
+                s for s in index.values()
+                if s.tvl is not None
+                and s.slug
+                and s.slug not in excluded_slugs
+                and (s.category or "") not in excluded
+            ),
+            key=lambda s: s.tvl or 0.0,
+            reverse=True,
+        )
+        merged = {s.strip() for s in curated if s.strip()}
+        for summary in ranked[:n]:
+            merged.add(summary.slug)
+        # Keep curated order first so alert/row ordering stays stable.
+        return curated + [s for s in sorted(merged - set(curated))]
 
     async def get_pack(self, slug: str, http: httpx.AsyncClient, refresh: bool = False) -> ResearchPack:
         now = time.monotonic()
@@ -84,13 +120,21 @@ class ProtocolResearchService:
         return pack
 
     async def get_packs(self, slugs: list[str], http: httpx.AsyncClient) -> list[ResearchPack]:
-        packs = []
-        for slug in slugs:
-            try:
-                packs.append(await self.get_pack(slug, http))
-            except Exception as exc:  # noqa: BLE001 - one bad slug must not sink the board
-                logger.warning("Failed to load protocol %s: %s", slug, exc)
-        return packs
+        """Fetch many packs concurrently (bounded by crawl_concurrency).
+        A failing slug is logged and skipped - one bad entry must not sink
+        the whole board."""
+        sem = asyncio.Semaphore(max(1, self.settings.crawl_concurrency))
+
+        async def one(slug: str) -> ResearchPack | None:
+            async with sem:
+                try:
+                    return await self.get_pack(slug, http)
+                except Exception as exc:  # noqa: BLE001 - resilient crawl
+                    logger.warning("Failed to load protocol %s: %s", slug, exc)
+                    return None
+
+        results = await asyncio.gather(*(one(s) for s in slugs))
+        return [p for p in results if p is not None]
 
 
 def pack_to_overview(pack: ResearchPack) -> ProtocolOverview:

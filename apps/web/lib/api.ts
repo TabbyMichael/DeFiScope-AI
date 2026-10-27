@@ -1,8 +1,10 @@
 import type {
   Alert,
+  DashboardResponse,
   ProtocolOverview,
   ProtocolResearch,
   ResearchBrief,
+  TvlPoint,
 } from "./types";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
@@ -18,9 +20,12 @@ async function get<T>(path: string, revalidate = 300): Promise<T> {
 }
 
 export const api = {
+  dashboard: () => get<DashboardResponse>("/api/dashboard", 120),
   protocols: () => get<ProtocolOverview[]>("/api/protocols"),
-  protocol: (slug: string) => get<ProtocolResearch>(`/api/protocols/${slug}`),
-  brief: (slug: string) => get<ResearchBrief>(`/api/briefs/${slug}`, 3600),
+  protocol: (slug: string) => get<ProtocolResearch>(`/api/protocols/${encodeURIComponent(slug)}`),
+  protocolHistory: (slug: string, days = 30) =>
+    get<TvlPoint[]>(`/api/protocols/${encodeURIComponent(slug)}/history?days=${days}`),
+  brief: (slug: string) => get<ResearchBrief>(`/api/briefs/${encodeURIComponent(slug)}`, 3600),
   alerts: () => get<Alert[]>("/api/alerts"),
   alertHistory: () => get<Alert[]>("/api/alerts/history"),
 };

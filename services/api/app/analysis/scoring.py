@@ -66,6 +66,36 @@ KNOWN_SECURITY_NOTES: dict[str, str] = {
                  "reposited and audited since. Historical event - verify current mitigations.",
     "compound-v3": "Audited pre-launch (2023); novel single-market Comet design "
                    "concentrates oracle dependency on Chainlink.",
+    "makerdao": "DAO system (Vaults/DSR) migrated to the Sky protocol in 2024-25; "
+                "historically strong audit record. Legacy TVL may be split across "
+                "makerdao/sky listings - verify which entity is measured.",
+    "sky": "Successor to the MakerDAO stablecoin system (USDS/sUSDS, 2024 migration); "
+           "SKY Token Governance introduced 'guardian' modules - additional "
+           "administrative trust surface. Audited; monitor governance centralization.",
+    "rocket-pool": "Multiple audits; minipool operator model decentralizes custody. "
+                   "Native fees / Saturn upgrades are recent - confirm audit coverage "
+                   "of current contract versions.",
+    "ether.fi": "Liquid restaking wrapper; weETH redemption relies on EigenLayer "
+                "withdrawal mechanics. Audited, but restaking adds EigenLayer/pod "
+                "chain trust assumptions on top of Lido-style staking risk.",
+    "pancakeswap": "Long-running BSC AMM; legacy V2 router exploited Sep 2023 (~$3M, "
+                   "funds returned). Core forks Uniswap designs; verify current "
+                   "deployment audit coverage per chain.",
+    "balancer": "Audited; 2021 imBTC pool incident was an oracle-manipulation vector "
+                "since mitigated. StablePools rely on oracle price bands - review "
+                "per-pool trust assumptions.",
+    "sushi": "Fork of Uniswap with long history; 2023 exploit of legacy Moola market "
+             "on BSC. Multi-fork codebase means audit coverage varies per deployment.",
+    "jupiter": "Solana aggregator; May 2024 'migrate' access-control bug drained "
+               "~$2.4M (funds returned). Aggregation routes depend on underlying "
+               "venues' security.",
+    "morpho": "Audited; vaults delegate curation to independent curators, so security "
+              "posture varies per vault/market rather than being protocol-wide.",
+    "fluid": "Newer composite protocol (DEX + lending + stablecoin in one contract); "
+             "audited by multiple firms but shorter live-time in production - treat "
+             "battle-testing evidence as limited.",
+    "pendle": "Audited; PT/YT markets add oracle and expiry-mechanics complexity - "
+              "rate volatility is economic exposure, not code failure.",
 }
 
 
