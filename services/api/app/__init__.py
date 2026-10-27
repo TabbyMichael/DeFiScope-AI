@@ -1,0 +1,1 @@
+"""DeFiScope AI backend package."""

@@ -1,0 +1,42 @@
+# DeFiScope AI - full stack for shared demos.
+# Local single-developer setup does NOT need Docker; see README "Quick start".
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: defiscope
+      POSTGRES_PASSWORD: defiscope
+      POSTGRES_DB: defiscope
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U defiscope"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  api:
+    build: ./services/api
+    environment:
+      DEFISCOPE_DATABASE_URL: postgresql+psycopg://defiscope:defiscope@db:5432/defiscope
+      DEFISCOPE_DEFAULT_PROTOCOLS: aave-v3,uniswap-v3,lido,curve-dex,compound-v3
+      # Optional: wire a model API key through from your shell
+      DEFISCOPE_OPENAI_API_KEY: ${DEFISCOPE_OPENAI_API_KEY:-}
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  web:
+    build: ./apps/web
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8000
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api
+
+volumes:
+  pgdata:
