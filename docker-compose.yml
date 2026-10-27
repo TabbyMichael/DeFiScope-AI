@@ -24,17 +24,22 @@ services:
       # Optional: wire a model API key through from your shell
       DEFISCOPE_OPENAI_API_KEY: ${DEFISCOPE_OPENAI_API_KEY:-}
     ports:
-      - "8000:8000"
+      - "3646:8000"
     depends_on:
       db:
         condition: service_healthy
 
   web:
-    build: ./apps/web
+    build:
+      context: ./apps/web
+      args:
+        # Baked at image build; use the internal service URL so the web
+        # container's server-side fetches resolve the API over the compose network.
+        NEXT_PUBLIC_API_URL: http://api:8000
     environment:
-      NEXT_PUBLIC_API_URL: http://localhost:8000
+      NEXT_PUBLIC_API_URL: http://api:8000
     ports:
-      - "3000:3000"
+      - "4000:3000"
     depends_on:
       - api
 

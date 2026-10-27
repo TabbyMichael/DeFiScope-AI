@@ -12,12 +12,26 @@ provides one). Two tables:
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Iterator
 
-from sqlalchemy import JSON, Column, DateTime, Float, Integer, String, create_engine
+from sqlalchemy import (
+    JSON,
+    Column,
+    DateTime,
+    Float,
+    Integer,
+    String,
+    UniqueConstraint,
+    create_engine,
+    inspect,
+    text,
+)
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 from app.config import get_settings
+
+logger = logging.getLogger(__name__)
 
 
 class Base(DeclarativeBase):
@@ -25,18 +39,35 @@ class Base(DeclarativeBase):
 
 
 class ProtocolSnapshot(Base):
+    """One daily observation per protocol. Persists the full normalized
+    overview so the dashboard can render entirely from the DB (DB-first)
+    rather than re-hitting DefiLlama on every page load. History rows also
+    back sparklines and point-in-time deltas."""
+
     __tablename__ = "protocol_snapshots"
 
     id = Column(Integer, primary_key=True)
     slug = Column(String, index=True, nullable=False)
     date = Column(String, nullable=False)  # ISO date of the observation
+    name = Column(String)
+    category = Column(String)
     tvl = Column(Float)
     staking_tvl = Column(Float)
+    change_7d = Column(Float)
+    change_30d = Column(Float)
+    volatility_30d = Column(Float)
+    top_chain = Column(String)
+    top_chain_share = Column(Float)
+    incentive_ratio = Column(Float)
+    stale_days = Column(Integer)
     risk_score = Column(Float)
     risk_band = Column(String)
     captured_at = Column(DateTime(timezone=True))
 
-    __table_args__ = ()
+    # A protocol should have at most one snapshot per day. This guards against
+    # duplicate (slug, date) rows from concurrent monitoring passes, which would
+    # otherwise double-count aggregate stats and appear twice in the board.
+    __table_args__ = (UniqueConstraint("slug", "date", name="uq_snapshot_slug_date"),)
 
 
 class AlertRecord(Base):
@@ -60,6 +91,44 @@ SessionLocal = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False
 
 def init_db() -> None:
     Base.metadata.create_all(engine)
+    _migrate_missing_columns()
+
+
+# Map ORM column type class names to SQL types valid on both SQLite and
+# PostgreSQL.
+_SQL_TYPES = {
+    "Float": "FLOAT",
+    "Integer": "INTEGER",
+    "JSON": "JSON",
+    "DateTime": "TIMESTAMP",
+}
+
+
+def _migrate_missing_columns() -> None:
+    """``create_all()`` only creates missing *tables*; it never ``ALTER``s an
+    existing one. So when new columns are added to a model after a database was
+    first created (e.g. the richer ProtocolSnapshot fields), an existing SQLite
+    file or a persisted Postgres volume would be missing them and every read /
+    write would fail. This adds any model column not yet present, idempotently.
+
+    A full migration tool (Alembic) is the long-term answer; this is a
+    zero-dependency guard sufficient for the additive-only changes this
+    project makes."""
+    inspector = inspect(engine)
+    table_names = inspector.get_table_names()
+    with engine.begin() as conn:
+        for table in Base.metadata.tables.values():
+            if table.name not in table_names:
+                continue  # create_all just made it with all columns
+            existing = {c["name"] for c in inspector.get_columns(table.name)}
+            for col in table.columns:
+                if col.name in existing:
+                    continue
+                sqltype = _SQL_TYPES.get(col.type.__class__.__name__, "VARCHAR")
+                logger.info("Migrating: adding column %s.%s", table.name, col.name)
+                conn.execute(
+                    text(f"ALTER TABLE {table.name} ADD COLUMN {col.name} {sqltype}")
+                )
 
 
 def get_session() -> Iterator[Session]:

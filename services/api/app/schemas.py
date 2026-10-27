@@ -27,6 +27,7 @@ class ProtocolOverview(BaseModel):
     stale_days: int | None = None
     source: str = "defillama"
     as_of: str | None = None
+    sparkline: list[TvlPoint] = Field(default_factory=list)
 
 
 class TvlPoint(BaseModel):
@@ -86,3 +87,32 @@ class ResearchBrief(BaseModel):
     sections: BriefSection
     as_of: str
     sources: list[str]
+
+
+class Mover(BaseModel):
+    """A protocol ranked by 7d TVL change (used for top gainers/losers)."""
+
+    slug: str
+    name: str
+    change_7d: float
+
+
+class DashboardStats(BaseModel):
+    total_tvl: float = 0.0
+    protocol_count: int = 0
+    by_band: dict[str, int] = Field(default_factory=dict)
+    active_critical: int = 0
+    active_warning: int = 0
+    top_gainer: Mover | None = None
+    top_loser: Mover | None = None
+
+
+class DashboardResponse(BaseModel):
+    """Everything the dashboard needs, sourced from the DB (latest snapshot
+    per protocol + alert_records) with a live DefiLlama hydration fallback."""
+
+    stats: DashboardStats
+    protocols: list[ProtocolOverview] = Field(default_factory=list)
+    alerts: list[Alert] = Field(default_factory=list)
+    aggregate_history: list[TvlPoint] = Field(default_factory=list)
+    as_of: str | None = None

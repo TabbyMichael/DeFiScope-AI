@@ -1,9 +1,9 @@
 const BAND_STYLES: Record<string, string> = {
-  low: "bg-emerald-500/15 text-emerald-400 border-emerald-500/30",
-  moderate: "bg-yellow-500/15 text-yellow-400 border-yellow-500/30",
-  elevated: "bg-orange-500/15 text-orange-400 border-orange-500/30",
-  high: "bg-red-500/15 text-red-400 border-red-500/30",
-  unknown: "bg-zinc-500/15 text-zinc-400 border-zinc-500/30",
+  low: "bg-emerald-500/15 text-emerald-600 border-emerald-500/30 dark:text-emerald-400",
+  moderate: "bg-yellow-500/15 text-yellow-700 border-yellow-500/30 dark:text-yellow-400",
+  elevated: "bg-orange-500/15 text-orange-600 border-orange-500/30 dark:text-orange-400",
+  high: "bg-red-500/15 text-red-600 border-red-500/30 dark:text-red-400",
+  unknown: "bg-zinc-500/15 text-zinc-600 border-zinc-500/30 dark:text-zinc-400",
 };
 
 export default function RiskBadge({

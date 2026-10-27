@@ -1,5 +1,10 @@
 // Mirrors services/api/app/schemas.py — keep in sync.
 
+export interface TvlPoint {
+  date: string;
+  tvl: number;
+}
+
 export interface ProtocolOverview {
   slug: string;
   name: string;
@@ -16,11 +21,7 @@ export interface ProtocolOverview {
   stale_days: number | null;
   source: string;
   as_of: string | null;
-}
-
-export interface TvlPoint {
-  date: string;
-  tvl: number;
+  sparkline: TvlPoint[];
 }
 
 export interface ChainShare {
@@ -89,4 +90,28 @@ export interface ResearchBrief {
   sections: BriefSections;
   as_of: string;
   sources: string[];
+}
+
+export interface Mover {
+  slug: string;
+  name: string;
+  change_7d: number;
+}
+
+export interface DashboardStats {
+  total_tvl: number;
+  protocol_count: number;
+  by_band: Record<string, number>;
+  active_critical: number;
+  active_warning: number;
+  top_gainer: Mover | null;
+  top_loser: Mover | null;
+}
+
+export interface DashboardResponse {
+  stats: DashboardStats;
+  protocols: ProtocolOverview[];
+  alerts: Alert[];
+  aggregate_history: TvlPoint[];
+  as_of: string | null;
 }
