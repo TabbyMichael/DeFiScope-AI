@@ -15,6 +15,8 @@ dependencies = [
     "psycopg[binary]>=3.1",
     "apscheduler>=3.10",
     "python-dateutil>=2.9",
+    "alembic>=1.20.1",
+    "reportlab>=5.1.0",
 ]
 
 [dependency-groups]
@@ -23,6 +25,7 @@ dev = [
     "pytest-asyncio>=0.23",
     "respx>=0.21",
     "aiodns",
+    "ruff>=0.6",
 ]
 
 [tool.pytest.ini_options]
@@ -36,3 +39,28 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["app"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["app", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W", "B", "UP"]
+# ruff-format already wraps code at line-length; the remaining long lines are
+# human-readable prose/string literals and comments that must not be broken.
+ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests legitimately assert on exact string bodies and use dict literals.
+"tests/*" = ["B011"]
+
+[tool.ruff.lint.flake8-bugbear]
+# FastAPI's dependency-injection helpers are meant to be called in argument
+# defaults; treat them as immutable calls rather than B008 violations.
+extend-immutable-calls = [
+    "fastapi.Depends",
+    "fastapi.Query",
+    "fastapi.Body",
+    "fastapi.Header",
+]

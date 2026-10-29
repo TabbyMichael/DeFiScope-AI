@@ -1,117 +1,38 @@
-// Mirrors services/api/app/schemas.py — keep in sync.
+// API domain types derived from the generated OpenAPI contract
+// (services/api/openapi.json -> lib/api-types.ts via `npm run gen:types`).
+// Do NOT hand-mirror the backend here: add fields to the FastAPI/Pydantic
+// schema, regenerate openapi.json, then run `npm run gen:types`.
 
-export interface TvlPoint {
-  date: string;
-  tvl: number;
-}
+import type { components } from "./api-types";
 
-export interface ProtocolOverview {
-  slug: string;
-  name: string;
-  category: string | null;
-  tvl: number | null;
-  change_7d: number | null;
-  change_30d: number | null;
-  volatility_30d: number | null;
-  top_chain: string | null;
-  top_chain_share: number | null;
-  incentive_ratio: number | null;
-  risk_score: number | null;
-  risk_band: "low" | "moderate" | "elevated" | "high" | "unknown";
-  stale_days: number | null;
-  source: string;
-  as_of: string | null;
-  sparkline: TvlPoint[];
-}
+type Schemas = components["schemas"];
 
-export interface ChainShare {
-  chain: string;
-  tvl: number;
-  share: number;
-}
+/**
+ * Make every property (recursively, incl. array elements) required.
+ *
+ * Pydantic response models expose defaulted fields as OpenAPI-optional, but our
+ * API always serializes them at runtime. This keeps the ergonomic non-optional
+ * shape the UI already depends on without hand-writing the struct again.
+ * Nullable fields (`T | null`) stay nullable; only the "missing" state is
+ * removed.
+ */
+type DeepRequired<T> = T extends Array<infer U>
+  ? Array<DeepRequired<U>>
+  : T extends object
+    ? { [K in keyof T]-?: DeepRequired<T[K]> }
+    : T;
 
-export interface RiskIndicator {
-  key: string;
-  label: string;
-  value: number | null;
-  score: number | null;
-  weight: number;
-  evidence: string;
-  limitation: string;
-}
+export type TvlPoint = DeepRequired<Schemas["TvlPoint"]>;
+export type RiskPoint = DeepRequired<Schemas["RiskPoint"]>;
+export type ProtocolOverview = DeepRequired<Schemas["ProtocolOverview"]>;
+export type ChainShare = DeepRequired<Schemas["ChainShare"]>;
+export type RiskIndicator = DeepRequired<Schemas["RiskIndicatorOut"]>;
+export type RiskAssessment = DeepRequired<Schemas["RiskAssessmentOut"]>;
+export type ProtocolResearch = DeepRequired<Schemas["ProtocolResearch"]>;
+export type Alert = DeepRequired<Schemas["Alert"]>;
+export type BriefSections = DeepRequired<Schemas["BriefSection"]>;
+export type ResearchBrief = DeepRequired<Schemas["ResearchBrief"]>;
+export type Mover = DeepRequired<Schemas["Mover"]>;
+export type DashboardStats = DeepRequired<Schemas["DashboardStats"]>;
+export type DashboardResponse = DeepRequired<Schemas["DashboardResponse"]>;
 
-export interface RiskAssessment {
-  slug: string;
-  composite_score: number | null;
-  band: string;
-  indicators: RiskIndicator[];
-  data_gaps: string[];
-}
-
-export interface ProtocolResearch {
-  slug: string;
-  name: string;
-  category: string | null;
-  url: string | null;
-  overview: ProtocolOverview;
-  tvl_series: TvlPoint[];
-  chains: ChainShare[];
-  risk: RiskAssessment;
-  data_gaps: string[];
-  as_of: string;
-  sources: string[];
-}
-
-export interface Alert {
-  id: string;
-  slug: string;
-  protocol: string;
-  rule: string;
-  severity: "info" | "warning" | "critical";
-  message: string;
-  evidence: Record<string, unknown>;
-  triggered_at: string;
-}
-
-export interface BriefSections {
-  executive_summary: string;
-  growth_drivers: string[];
-  risks: string[];
-  data_gaps: string[];
-  confidence: string;
-  recommendations: string[];
-}
-
-export interface ResearchBrief {
-  slug: string;
-  protocol: string;
-  generated_by: "llm" | "template";
-  markdown: string;
-  sections: BriefSections;
-  as_of: string;
-  sources: string[];
-}
-
-export interface Mover {
-  slug: string;
-  name: string;
-  change_7d: number;
-}
-
-export interface DashboardStats {
-  total_tvl: number;
-  protocol_count: number;
-  by_band: Record<string, number>;
-  active_critical: number;
-  active_warning: number;
-  top_gainer: Mover | null;
-  top_loser: Mover | null;
-}
-
-export interface DashboardResponse {
-  stats: DashboardStats;
-  protocols: ProtocolOverview[];
-  alerts: Alert[];
-  aggregate_history: TvlPoint[];
-  as_of: string | null;
-}

@@ -5,7 +5,6 @@ import time
 
 import httpx
 import respx
-
 from app.config import Settings
 from app.services.protocols import ProtocolResearchService
 
@@ -16,10 +15,7 @@ BASE = "https://api.llama.fi"
 def series(values: list[float]) -> list[dict]:
     now = int(time.time())
     n = len(values)
-    return [
-        {"date": now - (n - 1 - i) * DAY, "totalLiquidityUSD": v}
-        for i, v in enumerate(values)
-    ]
+    return [{"date": now - (n - 1 - i) * DAY, "totalLiquidityUSD": v} for i, v in enumerate(values)]
 
 
 def listing_entry(slug: str, tvl: float, category: str = "DeFi") -> dict:
@@ -137,7 +133,8 @@ class TestConcurrentPacks:
             rsp.get(f"{BASE}/protocols").respond(200, json=entries)
             for i in range(8):
                 detail = {
-                    "slug": f"p{i}", "name": f"P{i}",
+                    "slug": f"p{i}",
+                    "name": f"P{i}",
                     "currentChainTvls": {"Ethereum": 1000},
                     "tvl": series([1000 + j for j in range(10)]),
                 }

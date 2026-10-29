@@ -1,0 +1,1292 @@
+{
+  "components": {
+    "schemas": {
+      "Alert": {
+        "properties": {
+          "evidence": {
+            "additionalProperties": true,
+            "title": "Evidence",
+            "type": "object"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "protocol": {
+            "title": "Protocol",
+            "type": "string"
+          },
+          "rule": {
+            "title": "Rule",
+            "type": "string"
+          },
+          "severity": {
+            "title": "Severity",
+            "type": "string"
+          },
+          "slug": {
+            "title": "Slug",
+            "type": "string"
+          },
+          "triggered_at": {
+            "title": "Triggered At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "slug",
+          "protocol",
+          "rule",
+          "severity",
+          "message",
+          "evidence",
+          "triggered_at"
+        ],
+        "title": "Alert",
+        "type": "object"
+      },
+      "BriefSection": {
+        "properties": {
+          "confidence": {
+            "title": "Confidence",
+            "type": "string"
+          },
+          "data_gaps": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Data Gaps",
+            "type": "array"
+          },
+          "executive_summary": {
+            "title": "Executive Summary",
+            "type": "string"
+          },
+          "growth_drivers": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Growth Drivers",
+            "type": "array"
+          },
+          "recommendations": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Recommendations",
+            "type": "array"
+          },
+          "risks": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Risks",
+            "type": "array"
+          }
+        },
+        "required": [
+          "executive_summary",
+          "growth_drivers",
+          "risks",
+          "data_gaps",
+          "confidence",
+          "recommendations"
+        ],
+        "title": "BriefSection",
+        "type": "object"
+      },
+      "ChainShare": {
+        "properties": {
+          "chain": {
+            "title": "Chain",
+            "type": "string"
+          },
+          "share": {
+            "title": "Share",
+            "type": "number"
+          },
+          "tvl": {
+            "title": "Tvl",
+            "type": "number"
+          }
+        },
+        "required": [
+          "chain",
+          "tvl",
+          "share"
+        ],
+        "title": "ChainShare",
+        "type": "object"
+      },
+      "DashboardResponse": {
+        "description": "Everything the dashboard needs, sourced from the DB (latest snapshot\nper protocol + alert_records) with a live DefiLlama hydration fallback.",
+        "properties": {
+          "aggregate_history": {
+            "items": {
+              "$ref": "#/components/schemas/TvlPoint"
+            },
+            "title": "Aggregate History",
+            "type": "array"
+          },
+          "alerts": {
+            "items": {
+              "$ref": "#/components/schemas/Alert"
+            },
+            "title": "Alerts",
+            "type": "array"
+          },
+          "as_of": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "As Of"
+          },
+          "protocols": {
+            "items": {
+              "$ref": "#/components/schemas/ProtocolOverview"
+            },
+            "title": "Protocols",
+            "type": "array"
+          },
+          "stats": {
+            "$ref": "#/components/schemas/DashboardStats"
+          }
+        },
+        "required": [
+          "stats"
+        ],
+        "title": "DashboardResponse",
+        "type": "object"
+      },
+      "DashboardStats": {
+        "properties": {
+          "active_critical": {
+            "default": 0,
+            "title": "Active Critical",
+            "type": "integer"
+          },
+          "active_warning": {
+            "default": 0,
+            "title": "Active Warning",
+            "type": "integer"
+          },
+          "by_band": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "By Band",
+            "type": "object"
+          },
+          "protocol_count": {
+            "default": 0,
+            "title": "Protocol Count",
+            "type": "integer"
+          },
+          "top_gainer": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Mover"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "top_loser": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Mover"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "total_tvl": {
+            "default": 0.0,
+            "title": "Total Tvl",
+            "type": "number"
+          }
+        },
+        "title": "DashboardStats",
+        "type": "object"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "title": "Detail",
+            "type": "array"
+          }
+        },
+        "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "Mover": {
+        "description": "A protocol ranked by 7d TVL change (used for top gainers/losers).",
+        "properties": {
+          "change_7d": {
+            "title": "Change 7D",
+            "type": "number"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "slug": {
+            "title": "Slug",
+            "type": "string"
+          }
+        },
+        "required": [
+          "slug",
+          "name",
+          "change_7d"
+        ],
+        "title": "Mover",
+        "type": "object"
+      },
+      "ProtocolOverview": {
+        "properties": {
+          "as_of": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "As Of"
+          },
+          "category": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Category"
+          },
+          "change_30d": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Change 30D"
+          },
+          "change_7d": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Change 7D"
+          },
+          "depeg_asset": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Depeg Asset"
+          },
+          "depeg_worst_bps": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Depeg Worst Bps"
+          },
+          "fees_1d": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fees 1D"
+          },
+          "fees_30d": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fees 30D"
+          },
+          "fees_tvl": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fees Tvl"
+          },
+          "incentive_ratio": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Incentive Ratio"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "revenue_1d": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revenue 1D"
+          },
+          "risk_band": {
+            "default": "unknown",
+            "title": "Risk Band",
+            "type": "string"
+          },
+          "risk_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Risk Score"
+          },
+          "slug": {
+            "title": "Slug",
+            "type": "string"
+          },
+          "source": {
+            "default": "defillama",
+            "title": "Source",
+            "type": "string"
+          },
+          "sparkline": {
+            "items": {
+              "$ref": "#/components/schemas/TvlPoint"
+            },
+            "title": "Sparkline",
+            "type": "array"
+          },
+          "stale_days": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stale Days"
+          },
+          "top_chain": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Top Chain"
+          },
+          "top_chain_share": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Top Chain Share"
+          },
+          "tvl": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tvl"
+          },
+          "volatility_30d": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Volatility 30D"
+          },
+          "volume_1d": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Volume 1D"
+          },
+          "volume_tvl": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Volume Tvl"
+          }
+        },
+        "required": [
+          "slug",
+          "name"
+        ],
+        "title": "ProtocolOverview",
+        "type": "object"
+      },
+      "ProtocolResearch": {
+        "properties": {
+          "as_of": {
+            "title": "As Of",
+            "type": "string"
+          },
+          "category": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Category"
+          },
+          "chains": {
+            "items": {
+              "$ref": "#/components/schemas/ChainShare"
+            },
+            "title": "Chains",
+            "type": "array"
+          },
+          "data_gaps": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Data Gaps",
+            "type": "array"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "overview": {
+            "$ref": "#/components/schemas/ProtocolOverview"
+          },
+          "risk": {
+            "$ref": "#/components/schemas/RiskAssessmentOut"
+          },
+          "slug": {
+            "title": "Slug",
+            "type": "string"
+          },
+          "sources": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Sources",
+            "type": "array"
+          },
+          "tvl_series": {
+            "items": {
+              "$ref": "#/components/schemas/TvlPoint"
+            },
+            "title": "Tvl Series",
+            "type": "array"
+          },
+          "url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Url"
+          }
+        },
+        "required": [
+          "slug",
+          "name",
+          "overview",
+          "as_of"
+        ],
+        "title": "ProtocolResearch",
+        "type": "object"
+      },
+      "ResearchBrief": {
+        "properties": {
+          "as_of": {
+            "title": "As Of",
+            "type": "string"
+          },
+          "generated_by": {
+            "title": "Generated By",
+            "type": "string"
+          },
+          "markdown": {
+            "title": "Markdown",
+            "type": "string"
+          },
+          "protocol": {
+            "title": "Protocol",
+            "type": "string"
+          },
+          "sections": {
+            "$ref": "#/components/schemas/BriefSection"
+          },
+          "slug": {
+            "title": "Slug",
+            "type": "string"
+          },
+          "sources": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Sources",
+            "type": "array"
+          }
+        },
+        "required": [
+          "slug",
+          "protocol",
+          "generated_by",
+          "markdown",
+          "sections",
+          "as_of",
+          "sources"
+        ],
+        "title": "ResearchBrief",
+        "type": "object"
+      },
+      "RiskAssessmentOut": {
+        "description": "Typed shape of ``scoring.RiskAssessment.to_dict()``. Declaring it here\n(rather than a bare ``dict``) makes the explainable-risk structure part of\nthe OpenAPI contract so the frontend's generated types stay precise.",
+        "properties": {
+          "band": {
+            "default": "unknown",
+            "title": "Band",
+            "type": "string"
+          },
+          "composite_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Composite Score"
+          },
+          "data_gaps": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Data Gaps",
+            "type": "array"
+          },
+          "indicators": {
+            "items": {
+              "$ref": "#/components/schemas/RiskIndicatorOut"
+            },
+            "title": "Indicators",
+            "type": "array"
+          },
+          "slug": {
+            "default": "",
+            "title": "Slug",
+            "type": "string"
+          }
+        },
+        "title": "RiskAssessmentOut",
+        "type": "object"
+      },
+      "RiskIndicatorOut": {
+        "properties": {
+          "evidence": {
+            "title": "Evidence",
+            "type": "string"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "limitation": {
+            "title": "Limitation",
+            "type": "string"
+          },
+          "score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Score"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          },
+          "weight": {
+            "title": "Weight",
+            "type": "number"
+          }
+        },
+        "required": [
+          "key",
+          "label",
+          "value",
+          "score",
+          "weight",
+          "evidence",
+          "limitation"
+        ],
+        "title": "RiskIndicatorOut",
+        "type": "object"
+      },
+      "RiskPoint": {
+        "description": "One daily risk-score observation from ``protocol_snapshots``.\n\nOnly rows the scheduler actually scored carry a ``score``/``band``; the\ndeep DefiLlama backfill seeds TVL history without re-scoring every day, so\nthose are excluded from the trend rather than plotted as zero.",
+        "properties": {
+          "band": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Band"
+          },
+          "date": {
+            "title": "Date",
+            "type": "string"
+          },
+          "score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Score"
+          }
+        },
+        "required": [
+          "date"
+        ],
+        "title": "RiskPoint",
+        "type": "object"
+      },
+      "TvlPoint": {
+        "properties": {
+          "date": {
+            "title": "Date",
+            "type": "string"
+          },
+          "tvl": {
+            "title": "Tvl",
+            "type": "number"
+          }
+        },
+        "required": [
+          "date",
+          "tvl"
+        ],
+        "title": "TvlPoint",
+        "type": "object"
+      },
+      "ValidationError": {
+        "properties": {
+          "ctx": {
+            "title": "Context",
+            "type": "object"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "title": "Location",
+            "type": "array"
+          },
+          "msg": {
+            "title": "Message",
+            "type": "string"
+          },
+          "type": {
+            "title": "Error Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError",
+        "type": "object"
+      }
+    }
+  },
+  "info": {
+    "description": "DeFi protocol research, explainable risk scoring and monitoring API",
+    "title": "DeFiScope AI",
+    "version": "0.1.0"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/api/alerts": {
+      "get": {
+        "description": "Today's active alerts, served straight from the durable log.\n\nThis is a fast DB read - it does NOT trigger a crawl. The scheduler and\n``POST /api/alerts/run`` are the owners of the (expensive) DefiLlama\nmonitoring pass that populates these rows.",
+        "operationId": "current_alerts_api_alerts_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/Alert"
+                  },
+                  "title": "Response Current Alerts Api Alerts Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Current Alerts",
+        "tags": [
+          "alerts"
+        ]
+      }
+    },
+    "/api/alerts/history": {
+      "get": {
+        "operationId": "alert_history_api_alerts_history_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/Alert"
+                  },
+                  "title": "Response Alert History Api Alerts History Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Alert History",
+        "tags": [
+          "alerts"
+        ]
+      }
+    },
+    "/api/alerts/run": {
+      "post": {
+        "description": "Manual/admin trigger for a full monitoring pass: crawl the watchlist,\nevaluate rules, persist alerts + daily snapshots, then return the alerts\nthat fired on this pass (the same set ``GET /api/alerts`` will now serve).",
+        "operationId": "run_alert_check_api_alerts_run_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/Alert"
+                  },
+                  "title": "Response Run Alert Check Api Alerts Run Post",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Run Alert Check",
+        "tags": [
+          "alerts"
+        ]
+      }
+    },
+    "/api/briefs/{slug}": {
+      "get": {
+        "operationId": "protocol_brief_api_briefs__slug__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResearchBrief"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Protocol Brief",
+        "tags": [
+          "briefs"
+        ]
+      }
+    },
+    "/api/briefs/{slug}/export": {
+      "get": {
+        "description": "Render the brief for download as Markdown, CSV or PDF.\n\nReturns raw bytes with a ``Content-Disposition: attachment`` header so the\nbrowser saves the file. Unknown formats are a 400; an unfetchable protocol\nis a 404 (mirrors the JSON brief endpoint). The web app proxies this through\na same-origin route handler so the compose-internal API URL stays server-side.",
+        "operationId": "export_brief_api_briefs__slug__export_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          },
+          {
+            "description": "download format: md | csv | pdf",
+            "in": "query",
+            "name": "format",
+            "required": false,
+            "schema": {
+              "default": "md",
+              "description": "download format: md | csv | pdf",
+              "title": "Format",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Export Brief",
+        "tags": [
+          "briefs"
+        ]
+      }
+    },
+    "/api/dashboard": {
+      "get": {
+        "description": "Latest snapshot per protocol + aggregate stats + alert feed, all read\nfrom the DB. Hydrates from DefiLlama only when the DB is empty/stale.",
+        "operationId": "dashboard_api_dashboard_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DashboardResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Dashboard",
+        "tags": [
+          "dashboard"
+        ]
+      }
+    },
+    "/api/health": {
+      "get": {
+        "operationId": "health_api_health_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Health",
+        "tags": [
+          "meta"
+        ]
+      }
+    },
+    "/api/health/ready": {
+      "get": {
+        "operationId": "ready_api_health_ready_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Ready",
+        "tags": [
+          "meta"
+        ]
+      }
+    },
+    "/api/protocols": {
+      "get": {
+        "operationId": "list_protocols_api_protocols_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ProtocolOverview"
+                  },
+                  "title": "Response List Protocols Api Protocols Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Protocols",
+        "tags": [
+          "protocols"
+        ]
+      }
+    },
+    "/api/protocols/{slug}": {
+      "get": {
+        "operationId": "protocol_detail_api_protocols__slug__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProtocolResearch"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Protocol Detail",
+        "tags": [
+          "protocols"
+        ]
+      }
+    },
+    "/api/protocols/{slug}/history": {
+      "get": {
+        "operationId": "protocol_history_api_protocols__slug__history_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          },
+          {
+            "description": "trailing daily points",
+            "in": "query",
+            "name": "days",
+            "required": false,
+            "schema": {
+              "default": 30,
+              "description": "trailing daily points",
+              "maximum": 365,
+              "minimum": 1,
+              "title": "Days",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/TvlPoint"
+                  },
+                  "title": "Response Protocol History Api Protocols  Slug  History Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Protocol History",
+        "tags": [
+          "dashboard"
+        ]
+      }
+    },
+    "/api/protocols/{slug}/risk-history": {
+      "get": {
+        "description": "Daily composite risk-score trend for one protocol (DB read, no crawl).\n\nOnly days the scheduler actually scored are returned, so the series reflects\nreal observed risk rather than the null-scored DefiLlama backfill rows.",
+        "operationId": "protocol_risk_history_api_protocols__slug__risk_history_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          },
+          {
+            "description": "trailing scored days",
+            "in": "query",
+            "name": "days",
+            "required": false,
+            "schema": {
+              "default": 90,
+              "description": "trailing scored days",
+              "maximum": 365,
+              "minimum": 1,
+              "title": "Days",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/RiskPoint"
+                  },
+                  "title": "Response Protocol Risk History Api Protocols  Slug  Risk History Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Protocol Risk History",
+        "tags": [
+          "dashboard"
+        ]
+      }
+    }
+  }
+}

@@ -1,9 +1,8 @@
 """Guard for the Critical #1 fix: init_db() must add columns introduced to a
 model *after* a database already exists (create_all never ALTERs a table)."""
 
-from sqlalchemy import inspect, text
-
 from app.db import Base, ProtocolSnapshot, _migrate_missing_columns, engine, init_db
+from sqlalchemy import inspect, text
 
 
 def test_init_db_adds_missing_columns_to_existing_table():
@@ -42,16 +41,21 @@ def test_init_db_adds_missing_columns_to_existing_table():
 
     after = {c["name"] for c in inspect(engine).get_columns("protocol_snapshots")}
     for col in (
-        "name", "category", "change_7d", "change_30d", "volatility_30d",
-        "top_chain", "top_chain_share", "incentive_ratio", "stale_days",
+        "name",
+        "category",
+        "change_7d",
+        "change_30d",
+        "volatility_30d",
+        "top_chain",
+        "top_chain_share",
+        "incentive_ratio",
+        "stale_days",
     ):
         assert col in after, f"{col} was not added by the migration"
 
     # The legacy row is preserved (now with NULLs for the new columns).
     with engine.begin() as conn:
-        row = conn.execute(
-            text("SELECT slug, tvl, name FROM protocol_snapshots")
-        ).one()
+        row = conn.execute(text("SELECT slug, tvl, name FROM protocol_snapshots")).one()
     assert row.slug == "aave" and float(row.tvl) == 123.0 and row.name is None
 
     # And the ORM can now read/write the enriched model against that table.

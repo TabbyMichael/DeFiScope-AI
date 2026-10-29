@@ -8,8 +8,7 @@ traced back to a documented formula (see docs/methodology.md).
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pandas as pd
 
@@ -121,6 +120,94 @@ def incentive_ratio(
     return staking / core
 
 
+def ratio_to_tvl(value: float | None, tvl: float | None) -> float | None:
+    """Trailing ``value`` (fees, revenue or volume) as a fraction of current TVL
+    - a capital-efficiency ratio. None when either side is missing or TVL is not
+    positive, so an unavailable feed stays a gap rather than reading as 0."""
+    if value is None or tvl is None or tvl <= 0:
+        return None
+    return value / tvl
+
+
+def fees_tvl_ratio(fees: float | None, tvl: float | None) -> float | None:
+    """Fees generated relative to TVL over the same window (see ratio_to_tvl)."""
+    return ratio_to_tvl(fees, tvl)
+
+
+def volume_tvl_ratio(volume: float | None, tvl: float | None) -> float | None:
+    """Trading volume relative to TVL (turnover) over the same window."""
+    return ratio_to_tvl(volume, tvl)
+
+
+def price_normalized_tvl(
+    tvl_history: list[tuple[int, float]],
+    price_history: list[tuple[int, float]],
+    window_days: int = 30,
+) -> float | None:
+    """TVL change expressed in token terms, i.e. after dividing out the token's
+    own price. This decomposes a USD-TVL move into 'usage' vs 'price': if USD TVL
+    rose only because the token price rose, the price-normalized change is near
+    zero. Returns a percentage, or None when either series is missing/too short
+    or the aligned window has no valid price points."""
+    if not tvl_history or not price_history:
+        return None
+    tvl_df = series_to_frame(tvl_history)
+    price_df = series_to_frame(price_history).rename(columns={"tvl": "price"})
+    joined = tvl_df.join(price_df, how="inner")
+    if len(joined) < 2:
+        return None
+    joined = joined.iloc[-window_days:]
+    first, last = joined.iloc[0], joined.iloc[-1]
+    if first["price"] <= 0 or last["price"] <= 0:
+        return None
+    start = first["tvl"] / first["price"]
+    end = last["tvl"] / last["price"]
+    if start <= 0:
+        return None
+    return (end - start) / start * 100.0
+
+
+def peg_deviation_bps(price: float | None, target: float = 1.0) -> float | None:
+    """Signed deviation of a stablecoin price from its peg, in basis points.
+    ``target`` is the intended price (1.0 for a USD-pegged coin). Returns None
+    for a missing price or a non-positive target so an absent feed stays a gap."""
+    if price is None or target <= 0:
+        return None
+    return (price - target) / target * 10_000.0
+
+
+def max_peg_deviation_bps(
+    price_history: list[tuple[int, float]], target: float = 1.0
+) -> float | None:
+    """Worst absolute peg deviation over the observed window, in basis points.
+    None when the series is empty or has no valid price - i.e. 'unknown', never
+    read as 'on peg'."""
+    devs = [
+        abs(d)
+        for d in (peg_deviation_bps(price, target) for _ts, price in price_history)
+        if d is not None
+    ]
+    if not devs:
+        return None
+    return max(devs)
+
+
+def depeg_duration(
+    price_history: list[tuple[int, float]], tolerance_bps: float, target: float = 1.0
+) -> int | None:
+    """Count of observations that sat beyond +/- ``tolerance_bps`` of the peg.
+    With a daily ``/chart`` cadence this approximates days-out-of-band. None when
+    there is no valid data (a gap), 0 when the coin held its peg throughout."""
+    devs = [
+        d
+        for d in (peg_deviation_bps(price, target) for _ts, price in price_history)
+        if d is not None
+    ]
+    if not devs:
+        return None
+    return sum(1 for d in devs if abs(d) > tolerance_bps)
+
+
 def data_freshness_days(df: pd.DataFrame) -> int | None:
     """Days between the latest observation and now (UTC)."""
     if df.empty:
@@ -128,4 +215,4 @@ def data_freshness_days(df: pd.DataFrame) -> int | None:
     last = df.index.max()
     if last.tzinfo is None:
         last = last.tz_localize("UTC")
-    return max(0, (datetime.now(timezone.utc) - last).days)
+    return max(0, (datetime.now(UTC) - last).days)

@@ -22,6 +22,19 @@ class ProtocolOverview(BaseModel):
     top_chain: str | None = None
     top_chain_share: float | None = None
     incentive_ratio: float | None = None
+    # Economic-activity enrichment (Increment D). Null = the fees/volume host had
+    # no tracked series (a data gap), never a zero or a "safe" reading.
+    fees_1d: float | None = None
+    fees_30d: float | None = None
+    revenue_1d: float | None = None
+    volume_1d: float | None = None
+    fees_tvl: float | None = None
+    volume_tvl: float | None = None
+    # Stablecoin depeg watch (Increment E). Only populated for protocols that
+    # mint a tracked USD-pegged coin; null means no tracked coin or no price
+    # feed - a data gap, never a claim that everything is on peg.
+    depeg_worst_bps: float | None = None
+    depeg_asset: str | None = None
     risk_score: float | None = None
     risk_band: str = "unknown"
     stale_days: int | None = None
@@ -35,6 +48,18 @@ class TvlPoint(BaseModel):
     tvl: float
 
 
+class RiskPoint(BaseModel):
+    """One daily risk-score observation from ``protocol_snapshots``.
+
+    Only rows the scheduler actually scored carry a ``score``/``band``; the
+    deep DefiLlama backfill seeds TVL history without re-scoring every day, so
+    those are excluded from the trend rather than plotted as zero."""
+
+    date: str
+    score: float | None = None
+    band: str | None = None
+
+
 class RiskIndicatorOut(BaseModel):
     key: str
     label: str
@@ -45,6 +70,18 @@ class RiskIndicatorOut(BaseModel):
     limitation: str
 
 
+class RiskAssessmentOut(BaseModel):
+    """Typed shape of ``scoring.RiskAssessment.to_dict()``. Declaring it here
+    (rather than a bare ``dict``) makes the explainable-risk structure part of
+    the OpenAPI contract so the frontend's generated types stay precise."""
+
+    slug: str = ""
+    composite_score: float | None = None
+    band: str = "unknown"
+    indicators: list[RiskIndicatorOut] = Field(default_factory=list)
+    data_gaps: list[str] = Field(default_factory=list)
+
+
 class ProtocolResearch(BaseModel):
     slug: str
     name: str
@@ -53,7 +90,7 @@ class ProtocolResearch(BaseModel):
     overview: ProtocolOverview
     tvl_series: list[TvlPoint] = Field(default_factory=list)
     chains: list[ChainShare] = Field(default_factory=list)
-    risk: dict = Field(default_factory=dict)
+    risk: RiskAssessmentOut = Field(default_factory=RiskAssessmentOut)
     data_gaps: list[str] = Field(default_factory=list)
     as_of: str
     sources: list[str] = Field(default_factory=list)

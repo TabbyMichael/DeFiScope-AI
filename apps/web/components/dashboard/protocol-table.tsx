@@ -154,9 +154,9 @@ export default function ProtocolTable({
           </Select>
         </div>
       </CardHeader>
-      <CardContent>
+      <CardContent className="[&_[data-slot=table-container]]:max-h-[60vh] [&_[data-slot=table-container]]:overflow-auto">
         <Table>
-          <TableHeader>
+          <TableHeader className="[&>tr>th]:sticky [&>tr>th]:top-0 [&>tr>th]:z-10 [&>tr>th]:bg-card [&>tr>th]:shadow-[inset_0_-1px_0_var(--border)]">
             <TableRow>
               <SortHead label="Protocol" columnKey="name" sortKey={sortKey} dir={dir} onSort={toggleSort} />
               <TableHead className="hidden md:table-cell">Category</TableHead>

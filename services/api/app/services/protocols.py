@@ -14,8 +14,15 @@ from dataclasses import dataclass, field
 import httpx
 
 from app.analysis import metrics, scoring
-from app.clients.defillama import DefiLlamaClient, ProtocolDetail, ProtocolSummary
+from app.clients.defillama import (
+    DefiLlamaClient,
+    DexVolumeSummary,
+    FeeRevenueSummary,
+    ProtocolDetail,
+    ProtocolSummary,
+)
 from app.config import Settings, get_settings
+from app.reference_data import load_stablecoin_mapping
 from app.schemas import ChainShare, ProtocolOverview, ProtocolResearch, TvlPoint
 
 logger = logging.getLogger(__name__)
@@ -29,8 +36,15 @@ class ResearchPack:
 
     summary: ProtocolSummary | None
     detail: ProtocolDetail
-    tvl_df: "object" = field(default_factory=lambda: None)
+    tvl_df: object = field(default_factory=lambda: None)
     risk: scoring.RiskAssessment | None = None
+    fees: FeeRevenueSummary | None = None
+    volume: DexVolumeSummary | None = None
+    # Stablecoin depeg watch (Increment E): symbols this protocol mints, and
+    # their peg-price histories keyed by symbol. Empty dict => no tracked coin
+    # or no price data (a gap, not an on-peg pass).
+    minted_symbols: list[str] = field(default_factory=list)
+    peg_histories: dict[str, list[tuple[int, float]]] = field(default_factory=dict)
 
     @property
     def slug(self) -> str:
@@ -50,11 +64,24 @@ class ResearchPack:
 
 
 class ProtocolResearchService:
-    def __init__(self, client: DefiLlamaClient | None = None, settings: Settings | None = None) -> None:
+    def __init__(
+        self, client: DefiLlamaClient | None = None, settings: Settings | None = None
+    ) -> None:
         self.client = client or DefiLlamaClient()
         self.settings = settings or get_settings()
         self._cache: dict[str, tuple[float, ResearchPack]] = {}
+        self._cache_max = max(1, self.settings.research_cache_max_entries)
         self._list_cache: tuple[float, dict[str, ProtocolSummary]] | None = None
+
+    def _remember(self, slug: str, pack: ResearchPack, captured_at: float) -> None:
+        """Store a pack and evict oldest entries beyond the configured cap.
+        dict preserves insertion order, so ``next(iter(...))`` is the oldest.
+        Combined with the TTL check on read, this bounds memory for long-lived
+        processes that auto-discover the whole market."""
+        self._cache[slug] = (captured_at, pack)
+        while len(self._cache) > self._cache_max:
+            oldest = next(iter(self._cache))
+            del self._cache[oldest]
 
     async def _protocol_index(self, http: httpx.AsyncClient) -> dict[str, ProtocolSummary]:
         now = time.monotonic()
@@ -70,7 +97,7 @@ class ProtocolResearchService:
         directory (market-wide monitoring). If the directory listing is
         unreachable we degrade to the curated list rather than failing the
         monitoring pass."""
-        curated = [s for s in self.settings.default_protocols.split(",") if s.strip()]
+        curated = self.settings.protocol_slugs
         n = self.settings.market_top_n
         if n <= 0:
             return curated
@@ -83,7 +110,8 @@ class ProtocolResearchService:
         excluded_slugs = self.settings.excluded_slug_set
         ranked = sorted(
             (
-                s for s in index.values()
+                s
+                for s in index.values()
                 if s.tvl is not None
                 and s.slug
                 and s.slug not in excluded_slugs
@@ -92,13 +120,15 @@ class ProtocolResearchService:
             key=lambda s: s.tvl or 0.0,
             reverse=True,
         )
-        merged = {s.strip() for s in curated if s.strip()}
+        merged = set(curated)  # protocol_slugs is already split + stripped
         for summary in ranked[:n]:
             merged.add(summary.slug)
         # Keep curated order first so alert/row ordering stays stable.
-        return curated + [s for s in sorted(merged - set(curated))]
+        return curated + sorted(merged - set(curated))
 
-    async def get_pack(self, slug: str, http: httpx.AsyncClient, refresh: bool = False) -> ResearchPack:
+    async def get_pack(
+        self, slug: str, http: httpx.AsyncClient, refresh: bool = False
+    ) -> ResearchPack:
         now = time.monotonic()
         if not refresh and slug in self._cache and now - self._cache[slug][0] < CACHE_TTL_SECONDS:
             return self._cache[slug][1]
@@ -107,6 +137,38 @@ class ProtocolResearchService:
         index = await self._protocol_index(http)
         summary = index.get(slug)
         tvl_df = metrics.series_to_frame(detail.tvl_history)
+        # Enrichment (fees / volume) is strictly best-effort: the client already
+        # degrades to None on any failure, and this guard keeps a total outage on
+        # those secondary hosts from sinking the core TVL research pack.
+        fees: FeeRevenueSummary | None = None
+        volume: DexVolumeSummary | None = None
+        if self.settings.economic_data_enabled:
+            try:
+                fees = await self.client.get_fee_revenue(http, slug)
+                volume = await self.client.get_dex_volume(http, slug)
+            except Exception as exc:  # noqa: BLE001 - enrichment never breaks the pack
+                logger.info("Fee/volume enrichment skipped for %s: %s", slug, exc)
+        # Stablecoin depeg watch: fetch peg-price history for any stablecoin the
+        # curated map says this protocol mints. Best-effort - an unreachable price
+        # host leaves the indicator as a gap rather than failing the pack.
+        minted_symbols: list[str] = []
+        peg_histories: dict[str, list[tuple[int, float]]] = {}
+        if self.settings.stablecoin_data_enabled:
+            coin_map = load_stablecoin_mapping().get(slug, {})
+            if coin_map:
+                minted_symbols = list(coin_map)
+                try:
+                    by_id = await self.client.get_stablecoin_prices(
+                        http, list(coin_map.values()), self.settings.depeg_window_days
+                    )
+                    id_to_symbol = {cid: sym for sym, cid in coin_map.items()}
+                    peg_histories = {
+                        id_to_symbol[cid]: series
+                        for cid, series in by_id.items()
+                        if cid in id_to_symbol
+                    }
+                except Exception as exc:  # noqa: BLE001 - depeg watch is optional
+                    logger.info("Stablecoin peg enrichment skipped for %s: %s", slug, exc)
         risk = scoring.assess(
             slug=slug,
             tvl_df=tvl_df,
@@ -114,9 +176,21 @@ class ProtocolResearchService:
             tvl_history=detail.tvl_history,
             staking_history=detail.staking_history,
             audits=summary.audits if summary else None,
+            fees_30d=fees.fees_30d if fees else None,
+            minted_symbols=minted_symbols,
+            peg_histories=peg_histories,
         )
-        pack = ResearchPack(summary=summary, detail=detail, tvl_df=tvl_df, risk=risk)
-        self._cache[slug] = (now, pack)
+        pack = ResearchPack(
+            summary=summary,
+            detail=detail,
+            tvl_df=tvl_df,
+            risk=risk,
+            fees=fees,
+            volume=volume,
+            minted_symbols=minted_symbols,
+            peg_histories=peg_histories,
+        )
+        self._remember(slug, pack, now)
         return pack
 
     async def get_packs(self, slugs: list[str], http: httpx.AsyncClient) -> list[ResearchPack]:
@@ -144,17 +218,43 @@ def pack_to_overview(pack: ResearchPack) -> ProtocolOverview:
     chg_30d = metrics.pct_change(pack.tvl_df, 30)
     vol = metrics.volatility(pack.tvl_df, 30)
     inc = metrics.incentive_ratio(pack.detail.tvl_history, pack.detail.staking_history)
+    tvl = pack.latest_tvl
+    fees = pack.fees
+    volume = pack.volume
+    fees_tvl = metrics.fees_tvl_ratio(fees.fees_30d if fees else None, tvl)
+    volume_tvl = metrics.volume_tvl_ratio(volume.volume_30d if volume else None, tvl)
+    # Depeg watch: worst observed peg deviation across the coins this protocol
+    # mints (None when it mints none or the price feed was unavailable).
+    depeg_worst_bps: float | None = None
+    depeg_asset: str | None = None
+    for sym, hist in pack.peg_histories.items():
+        d = metrics.max_peg_deviation_bps(hist)
+        if d is None:
+            continue
+        if depeg_worst_bps is None or d > depeg_worst_bps:
+            depeg_worst_bps = d
+            depeg_asset = sym
     return ProtocolOverview(
         slug=pack.slug,
         name=pack.detail.name,
         category=pack.summary.category if pack.summary else None,
-        tvl=pack.latest_tvl,
+        tvl=tvl,
         change_7d=round(chg_7d, 2) if chg_7d is not None else None,
         change_30d=round(chg_30d, 2) if chg_30d is not None else None,
         volatility_30d=round(vol, 4) if vol is not None else None,
         top_chain=chain_info.get("top_chain"),
-        top_chain_share=round(chain_info["top_chain_share"], 4) if chain_info["total_tvl"] > 0 else None,
+        top_chain_share=round(chain_info["top_chain_share"], 4)
+        if chain_info["total_tvl"] > 0
+        else None,
         incentive_ratio=round(inc, 4) if inc is not None else None,
+        fees_1d=round(fees.fees_24h, 2) if fees and fees.fees_24h is not None else None,
+        fees_30d=round(fees.fees_30d, 2) if fees and fees.fees_30d is not None else None,
+        revenue_1d=round(fees.revenue_24h, 2) if fees and fees.revenue_24h is not None else None,
+        volume_1d=round(volume.volume_24h, 2) if volume and volume.volume_24h is not None else None,
+        fees_tvl=round(fees_tvl, 6) if fees_tvl is not None else None,
+        volume_tvl=round(volume_tvl, 4) if volume_tvl is not None else None,
+        depeg_worst_bps=round(depeg_worst_bps, 1) if depeg_worst_bps is not None else None,
+        depeg_asset=depeg_asset,
         risk_score=risk.composite_score if risk else None,
         risk_band=risk.band if risk else "unknown",
         stale_days=metrics.data_freshness_days(pack.tvl_df),
@@ -167,10 +267,14 @@ def pack_to_research(pack: ResearchPack, window_days: int = 180) -> ProtocolRese
     series = []
     if df is not None and not df.empty:
         tail = df.iloc[-window_days:]
-        series = [TvlPoint(date=str(idx.date()), tvl=round(float(v), 2)) for idx, v in tail["tvl"].items()]
+        series = [
+            TvlPoint(date=str(idx.date()), tvl=round(float(v), 2)) for idx, v in tail["tvl"].items()
+        ]
     chain_info = metrics.chain_concentration(pack.detail.current_chain_tvls)
     chains = [
-        ChainShare(chain=chain, tvl=round(pack.detail.current_chain_tvls[chain], 2), share=round(share, 4))
+        ChainShare(
+            chain=chain, tvl=round(pack.detail.current_chain_tvls[chain], 2), share=round(share, 4)
+        )
         for chain, share in sorted(chain_info.get("shares", {}).items(), key=lambda kv: -kv[1])
     ]
     risk = pack.risk

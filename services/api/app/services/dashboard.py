@@ -10,18 +10,19 @@ from __future__ import annotations
 
 import asyncio
 from collections import defaultdict
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 
 from sqlalchemy import and_, func
 from sqlalchemy.orm import Session
 
-from app.db import AlertRecord, ProtocolSnapshot
+from app.db import ProtocolSnapshot
 from app.schemas import (
     Alert,
     DashboardResponse,
     DashboardStats,
     Mover,
     ProtocolOverview,
+    RiskPoint,
     TvlPoint,
 )
 
@@ -106,7 +107,9 @@ def latest_rows(session: Session) -> list[ProtocolSnapshot]:
     return list(by_slug.values())
 
 
-def sparklines(session: Session, slugs: list[str], days: int = SPARKLINE_DAYS) -> dict[str, list[TvlPoint]]:
+def sparklines(
+    session: Session, slugs: list[str], days: int = SPARKLINE_DAYS
+) -> dict[str, list[TvlPoint]]:
     """Trailing daily series for many slugs in a single query (avoids the
     N+1 of calling ``history()`` per protocol on every board render)."""
     if not slugs:
@@ -135,6 +138,25 @@ def history(session: Session, slug: str, days: int = 30) -> list[TvlPoint]:
         .all()
     )
     return [TvlPoint(date=r.date, tvl=round(r.tvl or 0.0, 2)) for r in reversed(rows)]
+
+
+def risk_history(session: Session, slug: str, days: int = 90) -> list[RiskPoint]:
+    """Trailing daily risk-score observations for one protocol.
+
+    Filters to rows that actually carry a ``risk_score``: the initial DefiLlama
+    backfill seeds historical TVL days without re-scoring them (score is null),
+    so including those would plot a misleading flat/zero baseline. The result is
+    the genuine trend of the composite score over the days the scheduler ran.
+    Ascending by date."""
+    rows = (
+        session.query(ProtocolSnapshot)
+        .filter(ProtocolSnapshot.slug == slug)
+        .filter(ProtocolSnapshot.risk_score.isnot(None))
+        .order_by(ProtocolSnapshot.date.desc())
+        .limit(days)
+        .all()
+    )
+    return [RiskPoint(date=r.date, score=r.risk_score, band=r.risk_band) for r in reversed(rows)]
 
 
 def aggregate_history(session: Session, days: int = 90) -> list[TvlPoint]:
@@ -170,10 +192,20 @@ def aggregate_stats(rows: list[ProtocolSnapshot], alerts: list[Alert]) -> Dashbo
         by_band=by_band,
         active_critical=sum(1 for a in alerts if a.severity == "critical"),
         active_warning=sum(1 for a in alerts if a.severity == "warning"),
-        top_gainer=Mover(slug=top_gainer.slug, name=top_gainer.name or top_gainer.slug,
-                         change_7d=round(top_gainer.change_7d, 2)) if top_gainer else None,
-        top_loser=Mover(slug=top_loser.slug, name=top_loser.name or top_loser.slug,
-                        change_7d=round(top_loser.change_7d, 2)) if top_loser else None,
+        top_gainer=Mover(
+            slug=top_gainer.slug,
+            name=top_gainer.name or top_gainer.slug,
+            change_7d=round(top_gainer.change_7d, 2),
+        )
+        if top_gainer
+        else None,
+        top_loser=Mover(
+            slug=top_loser.slug,
+            name=top_loser.name or top_loser.slug,
+            change_7d=round(top_loser.change_7d, 2),
+        )
+        if top_loser
+        else None,
     )
 
 
@@ -184,33 +216,8 @@ def _is_stale(rows: list[ProtocolSnapshot]) -> bool:
     if newest is None:
         return True
     if newest.tzinfo is None:
-        newest = newest.replace(tzinfo=timezone.utc)
-    return datetime.now(timezone.utc) - newest > STALE_AFTER
-
-
-def _alerts_from_db(session: Session, limit: int = 50) -> list[Alert]:
-    """Recent alerts from the durable log, scoped to the current day so the
-    board's "active alerts" means the same thing the /api/alerts page reports
-    (which evaluates the live window). Alert ids are deterministic per day,
-    so today's rows are exactly the alerts active on the latest data window.
-    ``triggered_at`` is an ISO string, so a ``>=`` against the date prefix is a
-    valid lexicographic filter."""
-    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    rows = (
-        session.query(AlertRecord)
-        .filter(AlertRecord.triggered_at >= today)
-        .order_by(AlertRecord.triggered_at.desc())
-        .limit(limit)
-        .all()
-    )
-    return [
-        Alert(
-            id=r.id, slug=r.slug, protocol=r.protocol, rule=r.rule,
-            severity=r.severity, message=r.message, evidence=r.evidence or {},
-            triggered_at=r.triggered_at,
-        )
-        for r in rows
-    ]
+        newest = newest.replace(tzinfo=UTC)
+    return datetime.now(UTC) - newest > STALE_AFTER
 
 
 async def get_dashboard(svc, http, session: Session) -> DashboardResponse:
@@ -230,7 +237,8 @@ async def get_dashboard(svc, http, session: Session) -> DashboardResponse:
                 rows = latest_rows(session)
 
     # Single, consistent alert source for both the fresh and hydrated paths.
-    alerts = _alerts_from_db(session)
+    # Read today's persisted alerts from the shared helper (no crawl here).
+    alerts = alert_engine.today_alerts(session)
 
     protocols = [row_to_overview(r) for r in rows]
     series = sparklines(session, [p.slug for p in protocols], SPARKLINE_DAYS)

@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 
 import IndicatorCard from "@/components/IndicatorCard";
 import RiskBadge from "@/components/RiskBadge";
+import RiskTrendChart from "@/components/RiskTrendChart";
 import TvlChart from "@/components/TvlChart";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -15,18 +16,24 @@ import {
 } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { api, fmtPct, fmtUsd } from "@/lib/api";
-import type { ProtocolResearch, ResearchBrief } from "@/lib/types";
+import type { ProtocolResearch, ResearchBrief, RiskPoint } from "@/lib/types";
 
 async function ProtocolContent({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
   let data: ProtocolResearch;
   let brief: ResearchBrief | null = null;
+  let riskHistory: RiskPoint[] = [];
   try {
     data = await api.protocol(slug);
     try {
       brief = await api.brief(slug);
     } catch {
       brief = null; // brief generation failure must not break the research page
+    }
+    try {
+      riskHistory = await api.riskHistory(slug);
+    } catch {
+      riskHistory = []; // trend is best-effort; no snapshots yet is not an error
     }
   } catch (e) {
     console.error("protocol page error", e);
@@ -85,6 +92,52 @@ async function ProtocolContent({ params }: { params: Promise<{ slug: string }> }
       </Card>
 
       <Card>
+        <CardHeader>
+          <CardDescription>Fees, revenue & volume (DefiLlama adapters)</CardDescription>
+          <CardTitle>Economic activity</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
+            <Metric label="Fees (24h)" value={fmtUsd(o.fees_1d)} />
+            <Metric label="Revenue (24h)" value={fmtUsd(o.revenue_1d)} />
+            <Metric label="Volume (24h)" value={fmtUsd(o.volume_1d)} />
+            <Metric label="Fees / TVL (30d)" value={fmtRatio(o.fees_tvl)} />
+            <Metric label="Volume / TVL (30d)" value={fmtRatio(o.volume_tvl)} />
+          </div>
+          <p className="mt-3 text-xs leading-relaxed text-muted-foreground">
+            “—” means DefiLlama has no tracked series for this protocol — a data
+            gap, not zero. A low fee/volume-to-TVL ratio can also reflect
+            capital-efficient stores of value (liquid staking, stablecoins) rather
+            than weak real yield.
+          </p>
+        </CardContent>
+      </Card>
+
+      {o.depeg_asset && (
+        <Card>
+          <CardHeader>
+            <CardDescription>
+              Stablecoin this protocol mints ({o.depeg_asset})
+            </CardDescription>
+            <CardTitle>Stablecoin peg watch</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
+              <Metric label="Worst 30d peg deviation" value={fmtBps(o.depeg_worst_bps)} />
+              <Metric label="Tracked coin" value={o.depeg_asset ?? "—"} />
+            </div>
+            <p className="mt-3 text-xs leading-relaxed text-muted-foreground">
+              Deviation from the $1.00 peg, measured from DefiLlama price history
+              over the trailing window. A larger move means the coin traded away
+              from its peg at some point — a prompt to verify the peg mechanism,
+              not proof of an ongoing depeg. Protocols that mint no tracked
+              stablecoin show nothing here.
+            </p>
+          </CardContent>
+        </Card>
+      )}
+
+      <Card>
         <CardHeader className="flex-row items-center gap-3 space-y-0">
           <div>
             <CardDescription>Weighted, explainable indicators</CardDescription>
@@ -107,6 +160,18 @@ async function ProtocolContent({ params }: { params: Promise<{ slug: string }> }
               treated as &quot;safe&quot;.
             </p>
           )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardDescription>
+            Composite score captured by the scheduler over time
+          </CardDescription>
+          <CardTitle>Risk-score trend</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <RiskTrendChart data={riskHistory} />
         </CardContent>
       </Card>
 
@@ -163,6 +228,7 @@ async function ProtocolContent({ params }: { params: Promise<{ slug: string }> }
                 </a>
               ))}
             </p>
+            <BriefDownloads slug={data.slug} />
           </CardContent>
         </Card>
       )}
@@ -213,6 +279,53 @@ function BriefList({ title, items }: { title: string; items: string[] }) {
           </li>
         ))}
       </ul>
+    </div>
+  );
+}
+
+const EXPORT_FORMATS = [
+  { format: "md", label: "Markdown" },
+  { format: "csv", label: "CSV" },
+  { format: "pdf", label: "PDF" },
+] as const;
+
+// Server-rendered download links: each anchors to the same-origin
+// /api/brief-export proxy, so no client JS and the API host stays server-only.
+function BriefDownloads({ slug }: { slug: string }) {
+  return (
+    <div className="mt-4 flex flex-wrap items-center gap-2">
+      <span className="text-xs text-muted-foreground">Download brief:</span>
+      {EXPORT_FORMATS.map(({ format, label }) => (
+        <a
+          key={format}
+          href={`/api/brief-export/${encodeURIComponent(slug)}?format=${format}`}
+          download
+          className="inline-flex items-center rounded-md border border-input bg-transparent px-2.5 py-1 text-xs font-medium transition-colors hover:bg-accent hover:text-accent-foreground"
+        >
+          {label}
+        </a>
+      ))}
+    </div>
+  );
+}
+
+// A 0..1 fraction rendered as a percent; null stays an em dash (a data gap).
+function fmtRatio(v: number | null | undefined): string {
+  if (v == null) return "—";
+  return `${(v * 100).toFixed(2)}%`;
+}
+
+// Basis points from the $1 peg; null stays an em dash (a data gap).
+function fmtBps(v: number | null | undefined): string {
+  if (v == null) return "—";
+  return `${v.toFixed(0)} bps`;
+}
+
+function Metric({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="min-w-0">
+      <div className="text-xs text-muted-foreground">{label}</div>
+      <div className="mt-0.5 truncate text-base font-semibold tabular-nums">{value}</div>
     </div>
   );
 }

@@ -1,0 +1,23 @@
+{
+  "_comment": "Curated protocol -> minted/backed stablecoin map for the depeg watch (Increment E). Values are {symbol: coins.llama.fi coin-id}. Only protocols that MINT or algorithmically back a USD-pegged coin are listed; everything else is 'no direct peg exposure' (an honest exclusion, not a zero-risk score). Extensible: add a slug -> coin entry and the scorer/alert pick it up with no code change.",
+  "makerdao": {
+    "DAI": "coingecko:dai",
+    "USDS": "coingecko:usds"
+  },
+  "sky": {
+    "USDS": "coingecko:usds",
+    "DAI": "coingecko:dai"
+  },
+  "curve-dex": {
+    "crvUSD": "coingecko:crvusd"
+  },
+  "aave-v3": {
+    "GHO": "coingecko:gho"
+  },
+  "fraxfinance": {
+    "FRAX": "coingecko:frax"
+  },
+  "liquity": {
+    "LUSD": "coingecko:liquity-usd"
+  }
+}
