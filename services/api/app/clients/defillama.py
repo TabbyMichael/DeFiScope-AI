@@ -10,7 +10,9 @@ Documentation: https://defillama.com/docs/api
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import random
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -19,6 +21,26 @@ import httpx
 from app.config import get_settings
 
 logger = logging.getLogger(__name__)
+
+# Transient upstream statuses worth another attempt (rate limit / server blip).
+_RETRYABLE_STATUS = {429, 500, 502, 503, 504}
+
+
+def _retry_delay_seconds(response: httpx.Response | None, attempt: int) -> float:
+    """Seconds to wait before the next attempt.
+
+    Honors a numeric ``Retry-After`` header when present (DefiLlama/CDN rate
+    limits), otherwise falls back to capped exponential backoff with jitter so
+    concurrent crawls don't retry in lockstep."""
+    if response is not None:
+        raw = response.headers.get("Retry-After")
+        if raw:
+            try:
+                return max(0.0, float(raw))
+            except ValueError:
+                pass
+    base = min(8.0, (2**attempt) * 0.5)
+    return base + random.uniform(0, 0.25)
 
 
 class DefiLlamaError(RuntimeError):
@@ -86,23 +108,64 @@ def _extract_series(raw: Any) -> list[tuple[int, float]]:
 
 
 class DefiLlamaClient:
-    def __init__(self, base_url: str | None = None, timeout: float | None = None) -> None:
+    def __init__(
+        self,
+        base_url: str | None = None,
+        timeout: float | None = None,
+        max_retries: int | None = None,
+    ) -> None:
         settings = get_settings()
         self.base_url = (base_url or settings.defillama_base_url).rstrip("/")
         self.timeout = timeout or settings.http_timeout_seconds
+        self.max_retries = settings.defillama_max_retries if max_retries is None else max_retries
 
     async def _get(self, client: httpx.AsyncClient, path: str) -> Any:
         url = f"{self.base_url}{path}"
-        try:
-            resp = await client.get(url)
-            resp.raise_for_status()
-            return resp.json()
-        except httpx.HTTPStatusError as exc:
-            if exc.response.status_code == 404:
-                raise DefiLlamaError(f"Protocol not found: {path}") from exc
-            raise DefiLlamaError(f"DefiLlama error {exc.response.status_code} for {url}") from exc
-        except (httpx.HTTPError, ValueError) as exc:
-            raise DefiLlamaError(f"DefiLlama request failed for {url}: {exc}") from exc
+        attempts = max(1, self.max_retries + 1)
+        for attempt in range(attempts):
+            try:
+                resp = await client.get(url)
+                resp.raise_for_status()
+                return resp.json()
+            except httpx.HTTPStatusError as exc:
+                status = exc.response.status_code
+                # 404 = missing protocol: never retry, surface as a not-found.
+                if status == 404:
+                    raise DefiLlamaError(f"Protocol not found: {path}") from exc
+                # Retry transient upstream failures with backoff; else give up.
+                if status in _RETRYABLE_STATUS and attempt < attempts - 1:
+                    delay = _retry_delay_seconds(exc.response, attempt)
+                    logger.warning(
+                        "DefiLlama %s for %s; retrying in %.2fs (attempt %d/%d)",
+                        status,
+                        url,
+                        delay,
+                        attempt + 1,
+                        attempts,
+                    )
+                    await asyncio.sleep(delay)
+                    continue
+                raise DefiLlamaError(f"DefiLlama error {status} for {url}") from exc
+            except httpx.TransportError as exc:
+                if attempt < attempts - 1:
+                    delay = _retry_delay_seconds(None, attempt)
+                    logger.warning(
+                        "DefiLlama transport error for %s (%s); retrying in %.2fs (attempt %d/%d)",
+                        url,
+                        exc,
+                        delay,
+                        attempt + 1,
+                        attempts,
+                    )
+                    await asyncio.sleep(delay)
+                    continue
+                raise DefiLlamaError(f"DefiLlama request failed for {url}: {exc}") from exc
+            except ValueError as exc:
+                # Malformed/non-JSON body is not a transient failure - retrying
+                # the same response would just fail again.
+                raise DefiLlamaError(f"DefiLlama request failed for {url}: {exc}") from exc
+        # Unreachable: every loop branch returns or raises. Kept for type-safety.
+        raise DefiLlamaError(f"DefiLlama request failed for {url} after {attempts} attempts")
 
     async def list_protocols(self, client: httpx.AsyncClient) -> list[ProtocolSummary]:
         raw = await self._get(client, "/protocols")
@@ -147,5 +210,8 @@ class DefiLlamaClient:
             tvl_history=_extract_series(raw.get("tvl")),
             staking_history=_extract_series(raw.get("staking") or raw.get("stakingTvls")),
             borrowed_history=_extract_series(raw.get("borrowed")),
-            extra={"parentProtocol": raw.get("parentProtocol"), "description": raw.get("description")},
+            extra={
+                "parentProtocol": raw.get("parentProtocol"),
+                "description": raw.get("description"),
+            },
         )

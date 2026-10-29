@@ -1,0 +1,20 @@
+# Virtualenv & caches
+.venv
+__pycache__
+*.py[cod]
+.pytest_cache
+*.egg-info
+
+# Local databases & secrets (config is injected via env at runtime)
+*.db
+test.db
+.env
+
+# Tests are not needed in the runtime image
+tests
+
+# VCS & OS
+.git
+.gitignore
+.DS_Store
+Dockerfile

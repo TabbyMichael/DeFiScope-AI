@@ -1,9 +1,9 @@
 """DB-first dashboard read tests (no live network)."""
 
 import time
+from datetime import UTC
 
 import pytest
-
 from app.analysis import metrics, scoring
 from app.clients.defillama import ProtocolDetail, ProtocolSummary
 from app.db import Base, ProtocolSnapshot, SessionLocal, engine
@@ -29,8 +29,12 @@ def make_pack(values, slug="p1", name="P One", category="Lending") -> "alerts.Re
     n = len(values)
     hist = [(now - (n - 1 - i) * DAY, v) for i, v in enumerate(values)]
     detail = ProtocolDetail(
-        slug=slug, name=name, current_chain_tvls={"Ethereum": values[-1]},
-        tvl_history=hist, staking_history=[], borrowed_history=[],
+        slug=slug,
+        name=name,
+        current_chain_tvls={"Ethereum": values[-1]},
+        tvl_history=hist,
+        staking_history=[],
+        borrowed_history=[],
     )
     summary = ProtocolSummary(slug=slug, name=name, category=category, tvl=values[-1])
     df = metrics.series_to_frame(hist)
@@ -40,15 +44,21 @@ def make_pack(values, slug="p1", name="P One", category="Lending") -> "alerts.Re
 
 def snap(slug, date, tvl, name=None, band=None, change_7d=None, captured_at=None):
     return ProtocolSnapshot(
-        slug=slug, date=date, name=name or slug, category="Lending", tvl=tvl,
-        change_7d=change_7d, risk_band=band, captured_at=captured_at or _now(),
+        slug=slug,
+        date=date,
+        name=name or slug,
+        category="Lending",
+        tvl=tvl,
+        change_7d=change_7d,
+        risk_band=band,
+        captured_at=captured_at or _now(),
     )
 
 
 def _now():
-    from datetime import datetime, timezone
+    from datetime import datetime
 
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 class TestBackfillHistory:
@@ -70,10 +80,13 @@ class TestBackfillHistory:
 
 class TestLatestRows:
     def test_returns_newest_snapshot_per_slug(self, session):
-        session.add_all([
-            snap("a", "2026-01-01", 100), snap("a", "2026-02-01", 200),
-            snap("b", "2026-01-15", 50),
-        ])
+        session.add_all(
+            [
+                snap("a", "2026-01-01", 100),
+                snap("a", "2026-02-01", 200),
+                snap("b", "2026-01-15", 50),
+            ]
+        )
         session.commit()
         rows = {r.slug: r for r in dashboard.latest_rows(session)}
         assert set(rows) == {"a", "b"}
@@ -88,10 +101,26 @@ class TestAggregateStats:
             snap("lo", "2026-02-01", 700, band="low", change_7d=15),
         ]
         alerts_list = [
-            Alert(id="1", slug="hi", protocol="hi", rule="tvl_drop", severity="critical",
-                  message="", evidence={}, triggered_at="2026-02-01"),
-            Alert(id="2", slug="lo", protocol="lo", rule="tvl_surge", severity="warning",
-                  message="", evidence={}, triggered_at="2026-02-01"),
+            Alert(
+                id="1",
+                slug="hi",
+                protocol="hi",
+                rule="tvl_drop",
+                severity="critical",
+                message="",
+                evidence={},
+                triggered_at="2026-02-01",
+            ),
+            Alert(
+                id="2",
+                slug="lo",
+                protocol="lo",
+                rule="tvl_surge",
+                severity="warning",
+                message="",
+                evidence={},
+                triggered_at="2026-02-01",
+            ),
         ]
         stats = dashboard.aggregate_stats(rows, alerts_list)
         assert stats.total_tvl == 1000

@@ -159,12 +159,20 @@ def generate_template_brief(pack: ResearchPack) -> BriefSection:
                 f"No net TVL expansion over 30d ({o.change_30d:+.1f}%); recent flows are the main "
                 "growth channel to investigate."
             )
-    if o.top_chain_share is not None and o.top_chain_share < 0.7 and len(pack.detail.current_chain_tvls) > 3:
-        drivers.append(f"Deployment spans multiple chains with no single chain above "
-                       f"{o.top_chain_share * 100:.0f}% of TVL, widening the addressable user base.")
+    if (
+        o.top_chain_share is not None
+        and o.top_chain_share < 0.7
+        and len(pack.detail.current_chain_tvls) > 3
+    ):
+        drivers.append(
+            f"Deployment spans multiple chains with no single chain above "
+            f"{o.top_chain_share * 100:.0f}% of TVL, widening the addressable user base."
+        )
     if not drivers:
-        drivers.append("Evidence available from TVL data alone is insufficient to identify growth drivers; "
-                       "volume, fee and active-user data are required.")
+        drivers.append(
+            "Evidence available from TVL data alone is insufficient to identify growth drivers; "
+            "volume, fee and active-user data are required."
+        )
 
     risks = []
     if risk:
@@ -175,8 +183,10 @@ def generate_template_brief(pack: ResearchPack) -> BriefSection:
         for i in risky[:4]:
             risks.append(f"{i.label}: {i.evidence} (caveat: {i.limitation})")
     if not risks:
-        risks.append("No risk indicator currently scores in the elevated range on available data; "
-                     "this reflects data availability, not a security guarantee.")
+        risks.append(
+            "No risk indicator currently scores in the elevated range on available data; "
+            "this reflects data availability, not a security guarantee."
+        )
 
     gaps = []
     if risk and risk.data_gaps:
@@ -188,14 +198,19 @@ def generate_template_brief(pack: ResearchPack) -> BriefSection:
             "security_posture": "audit metadata; manual audit and incident review still required",
         }
         gaps.extend(f"Missing {label_map.get(g, g)}" for g in risk.data_gaps)
-    gaps.append("USD TVL conflates price movement with usage; on-chain volume/fee data is needed to "
-                "confirm organic activity. This brief cannot establish token-emission schedules or "
-                "the proportion of mercenary capital.")
+    gaps.append(
+        "USD TVL conflates price movement with usage; on-chain volume/fee data is needed to "
+        "confirm organic activity. This brief cannot establish token-emission schedules or "
+        "the proportion of mercenary capital."
+    )
 
-    confidence = "medium" if risk and risk.composite_score is not None and not risk.data_gaps else "low"
+    confidence = (
+        "medium" if risk and risk.composite_score is not None and not risk.data_gaps else "low"
+    )
     confidence_line = (
         f"{confidence.capitalize()}: composite risk computable from {len(risk.indicators) - len(risk.data_gaps) if risk else 0}/5 indicators."
-        if risk else "Low: no risk indicators computable."
+        if risk
+        else "Low: no risk indicators computable."
     )
 
     recs = [
@@ -204,9 +219,14 @@ def generate_template_brief(pack: ResearchPack) -> BriefSection:
         "Review the most recent audit reports and any post-audit contract upgrades before recommending integration.",
     ]
     if o.stale_days and o.stale_days > 1:
-        recs.insert(0, f"Data freshness: latest observation is {o.stale_days}d old - re-pull before circulating conclusions.")
+        recs.insert(
+            0,
+            f"Data freshness: latest observation is {o.stale_days}d old - re-pull before circulating conclusions.",
+        )
     if risk and "incentive_dependence" in (risk.data_gaps or []):
-        recs.append("Source emissions data (e.g. token terminal / Dune emissions queries) - incentive dependence is unmeasured here.")
+        recs.append(
+            "Source emissions data (e.g. token terminal / Dune emissions queries) - incentive dependence is unmeasured here."
+        )
 
     summary = (
         f"{name} ({o.category or 'DeFi'}) currently holds ${(o.tvl or 0.0):,.0f} TVL "
@@ -225,7 +245,9 @@ def generate_template_brief(pack: ResearchPack) -> BriefSection:
     )
 
 
-def sections_to_markdown(name: str, slug: str, s: BriefSection, as_of: str, sources: list[str], generated_by: str) -> str:
+def sections_to_markdown(
+    name: str, slug: str, s: BriefSection, as_of: str, sources: list[str], generated_by: str
+) -> str:
     def bullets(items: list[str]) -> str:
         return "\n".join(f"- {i}" for i in items)
 

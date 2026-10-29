@@ -1,12 +1,14 @@
 """API integration tests with mocked DefiLlama responses (no live network)."""
 
 import time
+from datetime import UTC, datetime
 
 import httpx
 import pytest
 import respx
-
+from app.db import Base, SessionLocal, engine
 from app.main import app
+from app.services import alerts as alert_engine
 from app.services.protocols import ProtocolResearchService
 
 DAY = 86_400
@@ -16,10 +18,7 @@ BASE = "https://api.llama.fi"
 def series(values: list[float]) -> list[dict]:
     now = int(time.time())
     n = len(values)
-    return [
-        {"date": now - (n - 1 - i) * DAY, "totalLiquidityUSD": v}
-        for i, v in enumerate(values)
-    ]
+    return [{"date": now - (n - 1 - i) * DAY, "totalLiquidityUSD": v} for i, v in enumerate(values)]
 
 
 PROTOCOLS_LISTING = [
@@ -118,3 +117,59 @@ class TestBriefsEndpoint:
         assert "Executive summary" in brief["markdown"]
         assert brief["sections"]["recommendations"]
         assert brief["as_of"]
+
+
+class TestAlertsEndpoints:
+    async def test_get_alerts_is_db_backed_and_does_not_crawl(self, api_client, monkeypatch):
+        # A live crawl here would be expensive; the GET must serve from the DB.
+        async def boom(*a, **k):
+            raise AssertionError("GET /api/alerts must not trigger run_monitor")
+
+        monkeypatch.setattr(alert_engine, "run_monitor", boom)
+        Base.metadata.create_all(engine)
+        today = datetime.now(UTC).strftime("%Y-%m-%d")
+        sess = SessionLocal()
+        try:
+            sess.add(
+                alert_engine.AlertRecord(
+                    id="alert-seed",
+                    slug="test-protocol",
+                    protocol="Test Protocol",
+                    rule="tvl_drop",
+                    severity="critical",
+                    message="seeded",
+                    evidence={"metric": "tvl_change_7d_pct", "observed": -40.0},
+                    triggered_at=f"{today}T00:00:00+00:00",
+                )
+            )
+            sess.commit()
+        finally:
+            sess.close()
+
+        resp = await api_client.get("/api/alerts")
+        assert resp.status_code == 200
+        rows = resp.json()
+        assert any(a["id"] == "alert-seed" and a["severity"] == "critical" for a in rows)
+
+    async def test_post_run_triggers_monitor_and_returns_alerts(self, api_client, monkeypatch):
+        async def fake_run(svc, http, session):
+            return [
+                alert_engine.Alert(
+                    id="alert-run",
+                    slug="test-protocol",
+                    protocol="Test Protocol",
+                    rule="daily_shock",
+                    severity="critical",
+                    message="fired",
+                    evidence={},
+                    triggered_at=datetime.now(UTC).isoformat(),
+                )
+            ]
+
+        monkeypatch.setattr(alert_engine, "run_monitor", fake_run)
+        resp = await api_client.post("/api/alerts/run")
+        assert resp.status_code == 200
+        rows = resp.json()
+        assert len(rows) == 1
+        assert rows[0]["id"] == "alert-run"
+        assert rows[0]["severity"] == "critical"

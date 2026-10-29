@@ -4,6 +4,7 @@
 services:
   db:
     image: postgres:16-alpine
+    restart: unless-stopped
     environment:
       POSTGRES_USER: defiscope
       POSTGRES_PASSWORD: defiscope
@@ -18,6 +19,7 @@ services:
 
   api:
     build: ./services/api
+    restart: unless-stopped
     environment:
       DEFISCOPE_DATABASE_URL: postgresql+psycopg://defiscope:defiscope@db:5432/defiscope
       DEFISCOPE_DEFAULT_PROTOCOLS: aave-v3,uniswap-v3,lido,curve-dex,compound-v3
@@ -25,6 +27,13 @@ services:
       DEFISCOPE_OPENAI_API_KEY: ${DEFISCOPE_OPENAI_API_KEY:-}
     ports:
       - "3646:8000"
+    # Image defines a HEALTHCHECK on /api/health/ready; wait for it to pass.
+    healthcheck:
+      test: ["CMD", "python", "-c", "import sys,urllib.request as u; sys.exit(0 if u.urlopen('http://127.0.0.1:8000/api/health/ready', timeout=3).status==200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
     depends_on:
       db:
         condition: service_healthy
@@ -36,12 +45,18 @@ services:
         # Baked at image build; use the internal service URL so the web
         # container's server-side fetches resolve the API over the compose network.
         NEXT_PUBLIC_API_URL: http://api:8000
+        # Browser-facing URL for the docs link. `api:8000` is unreachable from
+        # the host browser, so point it at the API's published host port (3646).
+        NEXT_PUBLIC_API_PUBLIC_URL: http://localhost:3646
+    restart: unless-stopped
     environment:
       NEXT_PUBLIC_API_URL: http://api:8000
+      NEXT_PUBLIC_API_PUBLIC_URL: http://localhost:3646
     ports:
       - "4000:3000"
     depends_on:
-      - api
+      api:
+        condition: service_healthy
 
 volumes:
   pgdata:

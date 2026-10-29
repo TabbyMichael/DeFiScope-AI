@@ -29,24 +29,47 @@ def session_dep() -> Session:
 
 @router.get("", response_model=list[Alert])
 async def current_alerts(
+    session: Session = Depends(session_dep),
+    limit: int = 50,
+):
+    """Today's active alerts, served straight from the durable log.
+
+    This is a fast DB read - it does NOT trigger a crawl. The scheduler and
+    ``POST /api/alerts/run`` are the owners of the (expensive) DefiLlama
+    monitoring pass that populates these rows."""
+    rows = alert_engine.today_alerts(session, limit=limit)
+    return sorted(rows, key=lambda a: (a.severity != "critical", a.triggered_at))
+
+
+@router.post("/run", response_model=list[Alert])
+async def run_alert_check(
     request: Request,
     svc: ProtocolResearchService = Depends(research_service),
     http: httpx.AsyncClient = Depends(http_client),
     session: Session = Depends(session_dep),
 ):
-    """Evaluate rules against freshly fetched data (cached 5 min) and persist
-    any new alerts. The dashboard polls this; the scheduler also runs it."""
+    """Manual/admin trigger for a full monitoring pass: crawl the watchlist,
+    evaluate rules, persist alerts + daily snapshots, then return the alerts
+    that fired on this pass (the same set ``GET /api/alerts`` will now serve)."""
     triggered = await alert_engine.run_monitor(svc, http, session)
     return sorted(triggered, key=lambda a: (a.severity != "critical", a.triggered_at))
 
 
 @router.get("/history", response_model=list[Alert])
 async def alert_history(session: Session = Depends(session_dep), limit: int = 100):
-    rows = session.execute(select(AlertRecord).order_by(AlertRecord.triggered_at.desc()).limit(limit)).scalars()
+    rows = session.execute(
+        select(AlertRecord).order_by(AlertRecord.triggered_at.desc()).limit(limit)
+    ).scalars()
     return [
         Alert(
-            id=r.id, slug=r.slug, protocol=r.protocol, rule=r.rule, severity=r.severity,
-            message=r.message, evidence=r.evidence or {}, triggered_at=r.triggered_at,
+            id=r.id,
+            slug=r.slug,
+            protocol=r.protocol,
+            rule=r.rule,
+            severity=r.severity,
+            message=r.message,
+            evidence=r.evidence or {},
+            triggered_at=r.triggered_at,
         )
         for r in rows
     ]

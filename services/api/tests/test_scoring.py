@@ -96,8 +96,12 @@ class TestMissingData:
 
     def test_all_missing_yields_unknown_band(self):
         result = scoring.assess(
-            slug="empty", tvl_df=metrics.series_to_frame([]), chain_tvls={},
-            tvl_history=[], staking_history=[], audits=None,
+            slug="empty",
+            tvl_df=metrics.series_to_frame([]),
+            chain_tvls={},
+            tvl_history=[],
+            staking_history=[],
+            audits=None,
         )
         assert result.band == "unknown"
         assert result.composite_score is None

@@ -111,9 +111,12 @@ def _migrate_missing_columns() -> None:
     file or a persisted Postgres volume would be missing them and every read /
     write would fail. This adds any model column not yet present, idempotently.
 
-    A full migration tool (Alembic) is the long-term answer; this is a
-    zero-dependency guard sufficient for the additive-only changes this
-    project makes."""
+    A full migration tool (Alembic) is now configured (``services/api/alembic``,
+    baseline revision creates both tables) and is the source of truth for schema
+    changes. This in-process guard remains as a safety net for databases created
+    before a given column existed - e.g. a persisted SQLite file or Postgres
+    volume that predates a deploy - so ``init_db()`` keeps an un-migrated store
+    usable without blocking startup on ``alembic upgrade head``."""
     inspector = inspect(engine)
     table_names = inspector.get_table_names()
     with engine.begin() as conn:
@@ -126,9 +129,7 @@ def _migrate_missing_columns() -> None:
                     continue
                 sqltype = _SQL_TYPES.get(col.type.__class__.__name__, "VARCHAR")
                 logger.info("Migrating: adding column %s.%s", table.name, col.name)
-                conn.execute(
-                    text(f"ALTER TABLE {table.name} ADD COLUMN {col.name} {sqltype}")
-                )
+                conn.execute(text(f"ALTER TABLE {table.name} ADD COLUMN {col.name} {sqltype}"))
 
 
 def get_session() -> Iterator[Session]:

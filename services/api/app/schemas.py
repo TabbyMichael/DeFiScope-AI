@@ -45,6 +45,18 @@ class RiskIndicatorOut(BaseModel):
     limitation: str
 
 
+class RiskAssessmentOut(BaseModel):
+    """Typed shape of ``scoring.RiskAssessment.to_dict()``. Declaring it here
+    (rather than a bare ``dict``) makes the explainable-risk structure part of
+    the OpenAPI contract so the frontend's generated types stay precise."""
+
+    slug: str = ""
+    composite_score: float | None = None
+    band: str = "unknown"
+    indicators: list[RiskIndicatorOut] = Field(default_factory=list)
+    data_gaps: list[str] = Field(default_factory=list)
+
+
 class ProtocolResearch(BaseModel):
     slug: str
     name: str
@@ -53,7 +65,7 @@ class ProtocolResearch(BaseModel):
     overview: ProtocolOverview
     tvl_series: list[TvlPoint] = Field(default_factory=list)
     chains: list[ChainShare] = Field(default_factory=list)
-    risk: dict = Field(default_factory=dict)
+    risk: RiskAssessmentOut = Field(default_factory=RiskAssessmentOut)
     data_gaps: list[str] = Field(default_factory=list)
     as_of: str
     sources: list[str] = Field(default_factory=list)

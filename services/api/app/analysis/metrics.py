@@ -8,8 +8,7 @@ traced back to a documented formula (see docs/methodology.md).
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pandas as pd
 
@@ -128,4 +127,4 @@ def data_freshness_days(df: pd.DataFrame) -> int | None:
     last = df.index.max()
     if last.tzinfo is None:
         last = last.tz_localize("UTC")
-    return max(0, (datetime.now(timezone.utc) - last).days)
+    return max(0, (datetime.now(UTC) - last).days)

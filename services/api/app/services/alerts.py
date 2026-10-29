@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy.orm import Session
 
@@ -33,10 +33,40 @@ def _alert_id(slug: str, rule: str, day: str) -> str:
     return f"alert-{digest}"
 
 
+def today_alerts(session: Session, limit: int = 50) -> list[Alert]:
+    """Today's persisted alerts, read straight from the durable log.
+
+    Alert ids are deterministic per protocol/rule/day, so the current-day rows
+    are exactly the alerts active on the latest evaluated window. This lets the
+    alerts endpoint serve from the DB instead of running a fresh crawl on every
+    request (the scheduler and POST /api/alerts/run own the crawl)."""
+    today = datetime.now(UTC).strftime("%Y-%m-%d")
+    rows = (
+        session.query(AlertRecord)
+        .filter(AlertRecord.triggered_at >= today)
+        .order_by(AlertRecord.triggered_at.desc())
+        .limit(limit)
+        .all()
+    )
+    return [
+        Alert(
+            id=r.id,
+            slug=r.slug,
+            protocol=r.protocol,
+            rule=r.rule,
+            severity=r.severity,
+            message=r.message,
+            evidence=r.evidence or {},
+            triggered_at=r.triggered_at,
+        )
+        for r in rows
+    ]
+
+
 def evaluate_pack(pack: ResearchPack) -> list[Alert]:
     settings = get_settings()
     alerts: list[Alert] = []
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     name = pack.detail.name
     day = now.strftime("%Y-%m-%d")
     chg_7d = metrics.pct_change(pack.tvl_df, 7)
@@ -44,76 +74,141 @@ def evaluate_pack(pack: ResearchPack) -> list[Alert]:
 
     if chg_7d is not None and chg_7d <= settings.alert_tvl_drop_pct:
         severity = "critical" if chg_7d <= settings.alert_tvl_drop_pct * 2 else "warning"
-        alerts.append(Alert(
-            id=_alert_id(pack.slug, "tvl_drop", day), slug=pack.slug, protocol=name,
-            rule="tvl_drop", severity=severity,
-            message=f"{name} TVL fell {chg_7d:.1f}% over 7d (threshold {settings.alert_tvl_drop_pct}%).",
-            evidence={"metric": "tvl_change_7d_pct", "observed": round(chg_7d, 2),
-                      "threshold": settings.alert_tvl_drop_pct,
-                      "latest_tvl": pack.latest_tvl, "window_days": 7},
-            triggered_at=now.isoformat(),
-        ))
+        alerts.append(
+            Alert(
+                id=_alert_id(pack.slug, "tvl_drop", day),
+                slug=pack.slug,
+                protocol=name,
+                rule="tvl_drop",
+                severity=severity,
+                message=f"{name} TVL fell {chg_7d:.1f}% over 7d (threshold {settings.alert_tvl_drop_pct}%).",
+                evidence={
+                    "metric": "tvl_change_7d_pct",
+                    "observed": round(chg_7d, 2),
+                    "threshold": settings.alert_tvl_drop_pct,
+                    "latest_tvl": pack.latest_tvl,
+                    "window_days": 7,
+                },
+                triggered_at=now.isoformat(),
+            )
+        )
 
     if chg_7d is not None and chg_7d >= settings.alert_tvl_surge_pct:
-        alerts.append(Alert(
-            id=_alert_id(pack.slug, "tvl_surge", day), slug=pack.slug, protocol=name,
-            rule="tvl_surge", severity="info",
-            message=(f"{name} TVL rose {chg_7d:.1f}% over 7d (threshold "
-                     f"{settings.alert_tvl_surge_pct}%). Verify whether growth is "
-                     "incentive-driven before treating it as adoption."),
-            evidence={"metric": "tvl_change_7d_pct", "observed": round(chg_7d, 2),
-                      "threshold": settings.alert_tvl_surge_pct,
-                      "latest_tvl": pack.latest_tvl, "window_days": 7},
-            triggered_at=now.isoformat(),
-        ))
+        alerts.append(
+            Alert(
+                id=_alert_id(pack.slug, "tvl_surge", day),
+                slug=pack.slug,
+                protocol=name,
+                rule="tvl_surge",
+                severity="info",
+                message=(
+                    f"{name} TVL rose {chg_7d:.1f}% over 7d (threshold "
+                    f"{settings.alert_tvl_surge_pct}%). Verify whether growth is "
+                    "incentive-driven before treating it as adoption."
+                ),
+                evidence={
+                    "metric": "tvl_change_7d_pct",
+                    "observed": round(chg_7d, 2),
+                    "threshold": settings.alert_tvl_surge_pct,
+                    "latest_tvl": pack.latest_tvl,
+                    "window_days": 7,
+                },
+                triggered_at=now.isoformat(),
+            )
+        )
 
     inc = metrics.incentive_ratio(pack.detail.tvl_history, pack.detail.staking_history)
     if inc is not None and inc >= settings.alert_staking_ratio:
-        alerts.append(Alert(
-            id=_alert_id(pack.slug, "incentive_dependence", day), slug=pack.slug, protocol=name,
-            rule="incentive_dependence", severity="warning",
-            message=(f"{name}: staking/incentive TVL is {inc * 100:.0f}% of core TVL - "
-                     "heavy dependence on emissions-backed value."),
-            evidence={"metric": "staking_to_tvl_ratio", "observed": round(inc, 3),
-                      "threshold": settings.alert_staking_ratio},
-            triggered_at=now.isoformat(),
-        ))
+        alerts.append(
+            Alert(
+                id=_alert_id(pack.slug, "incentive_dependence", day),
+                slug=pack.slug,
+                protocol=name,
+                rule="incentive_dependence",
+                severity="warning",
+                message=(
+                    f"{name}: staking/incentive TVL is {inc * 100:.0f}% of core TVL - "
+                    "heavy dependence on emissions-backed value."
+                ),
+                evidence={
+                    "metric": "staking_to_tvl_ratio",
+                    "observed": round(inc, 3),
+                    "threshold": settings.alert_staking_ratio,
+                },
+                triggered_at=now.isoformat(),
+            )
+        )
 
     stale = metrics.data_freshness_days(pack.tvl_df)
     if stale is not None and stale > settings.alert_stale_data_days:
-        alerts.append(Alert(
-            id=_alert_id(pack.slug, "stale_data", day), slug=pack.slug, protocol=name,
-            rule="stale_data", severity="warning",
-            message=(f"{name}: latest DefiLlama observation is {stale}d old - "
-                     "downstream metrics may not reflect current conditions."),
-            evidence={"metric": "data_age_days", "observed": stale,
-                      "threshold": settings.alert_stale_data_days},
-            triggered_at=now.isoformat(),
-        ))
+        alerts.append(
+            Alert(
+                id=_alert_id(pack.slug, "stale_data", day),
+                slug=pack.slug,
+                protocol=name,
+                rule="stale_data",
+                severity="warning",
+                message=(
+                    f"{name}: latest DefiLlama observation is {stale}d old - "
+                    "downstream metrics may not reflect current conditions."
+                ),
+                evidence={
+                    "metric": "data_age_days",
+                    "observed": stale,
+                    "threshold": settings.alert_stale_data_days,
+                },
+                triggered_at=now.isoformat(),
+            )
+        )
 
     if chg_1d is not None and chg_1d <= -10:
-        alerts.append(Alert(
-            id=_alert_id(pack.slug, "daily_shock", day), slug=pack.slug, protocol=name,
-            rule="daily_shock", severity="critical",
-            message=f"{name} TVL dropped {chg_1d:.1f}% in 24h - possible exploit, depeg or mass exit.",
-            evidence={"metric": "tvl_change_1d_pct", "observed": round(chg_1d, 2),
-                      "threshold": -10.0},
-            triggered_at=now.isoformat(),
-        ))
+        alerts.append(
+            Alert(
+                id=_alert_id(pack.slug, "daily_shock", day),
+                slug=pack.slug,
+                protocol=name,
+                rule="daily_shock",
+                severity="critical",
+                message=f"{name} TVL dropped {chg_1d:.1f}% in 24h - possible exploit, depeg or mass exit.",
+                evidence={
+                    "metric": "tvl_change_1d_pct",
+                    "observed": round(chg_1d, 2),
+                    "threshold": -10.0,
+                },
+                triggered_at=now.isoformat(),
+            )
+        )
 
     return alerts
 
 
 def persist_alerts(session: Session, alerts: list[Alert]) -> None:
-    """Idempotent upsert: deterministic ids mean a same-day re-run updates
-    evidence instead of inserting duplicates."""
+    """Idempotent upsert: deterministic ids mean a same-day re-run refreshes
+    the existing row (latest severity/message/evidence) instead of inserting a
+    duplicate. Alert ids encode protocol/rule/day, so the row keeps a stable id
+    while its evidence tracks the most recent evaluation of that day."""
     for a in alerts:
-        if session.get(AlertRecord, a.id) is None:
-            session.add(AlertRecord(
-                id=a.id, slug=a.slug, protocol=a.protocol, rule=a.rule,
-                severity=a.severity, message=a.message, evidence=a.evidence,
-                triggered_at=a.triggered_at,
-            ))
+        existing = session.get(AlertRecord, a.id)
+        if existing is None:
+            session.add(
+                AlertRecord(
+                    id=a.id,
+                    slug=a.slug,
+                    protocol=a.protocol,
+                    rule=a.rule,
+                    severity=a.severity,
+                    message=a.message,
+                    evidence=a.evidence,
+                    triggered_at=a.triggered_at,
+                )
+            )
+        else:
+            # Same protocol/rule/day re-evaluated: refresh the mutable payload so
+            # the durable log reflects the newest observed values.
+            existing.severity = a.severity
+            existing.message = a.message
+            existing.evidence = a.evidence
+            existing.triggered_at = a.triggered_at
     session.commit()
 
 
@@ -136,21 +231,31 @@ def persist_snapshots(session: Session, packs: list[ResearchPack]) -> None:
             # capture timestamp: the dashboard's staleness check reads
             # max(captured_at), and leaving it frozen would make every request
             # after 6h think the board is stale and re-trigger a live crawl.
-            exists.captured_at = datetime.now(timezone.utc)
+            exists.captured_at = datetime.now(UTC)
             continue
         o = pack_to_overview(pack)
         staking_df = metrics.series_to_frame(pack.detail.staking_history)
         staking = float(staking_df["tvl"].iloc[-1]) if not staking_df.empty else None
-        session.add(ProtocolSnapshot(
-            slug=pack.slug, date=date, name=o.name, category=o.category,
-            tvl=o.tvl, staking_tvl=staking,
-            change_7d=o.change_7d, change_30d=o.change_30d,
-            volatility_30d=o.volatility_30d,
-            top_chain=o.top_chain, top_chain_share=o.top_chain_share,
-            incentive_ratio=o.incentive_ratio, stale_days=o.stale_days,
-            risk_score=o.risk_score, risk_band=o.risk_band,
-            captured_at=datetime.now(timezone.utc),
-        ))
+        session.add(
+            ProtocolSnapshot(
+                slug=pack.slug,
+                date=date,
+                name=o.name,
+                category=o.category,
+                tvl=o.tvl,
+                staking_tvl=staking,
+                change_7d=o.change_7d,
+                change_30d=o.change_30d,
+                volatility_30d=o.volatility_30d,
+                top_chain=o.top_chain,
+                top_chain_share=o.top_chain_share,
+                incentive_ratio=o.incentive_ratio,
+                stale_days=o.stale_days,
+                risk_score=o.risk_score,
+                risk_band=o.risk_band,
+                captured_at=datetime.now(UTC),
+            )
+        )
     session.commit()
 
 
@@ -165,11 +270,14 @@ def backfill_history(session: Session, pack: ResearchPack) -> None:
     has_rows = session.query(ProtocolSnapshot).filter(ProtocolSnapshot.slug == pack.slug).first()
     if has_rows is not None:
         return
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     rows = [
         ProtocolSnapshot(
-            slug=pack.slug, date=str(idx.date()), name=pack.detail.name,
-            tvl=round(float(val), 2), captured_at=now,
+            slug=pack.slug,
+            date=str(idx.date()),
+            name=pack.detail.name,
+            tvl=round(float(val), 2),
+            captured_at=now,
         )
         for idx, val in df["tvl"].items()
         if str(idx.date()) != pack.latest_date  # latest handled by persist_snapshots

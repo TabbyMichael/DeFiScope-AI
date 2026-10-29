@@ -9,19 +9,28 @@ from app.services.protocols import ResearchPack
 DAY = 86_400
 
 
-def make_pack(tvl_values: list[float], staking_values: list[float] | None = None,
-              end_days_ago: int = 0, slug: str = "test-protocol") -> ResearchPack:
+def make_pack(
+    tvl_values: list[float],
+    staking_values: list[float] | None = None,
+    end_days_ago: int = 0,
+    slug: str = "test-protocol",
+) -> ResearchPack:
     now = int(time.time())
     n = len(tvl_values)
     tvl_hist = [(now - (n - 1 - i + end_days_ago) * DAY, v) for i, v in enumerate(tvl_values)]
     staking_hist = []
     if staking_values:
         m = len(staking_values)
-        staking_hist = [(now - (m - 1 - i + end_days_ago) * DAY, v) for i, v in enumerate(staking_values)]
+        staking_hist = [
+            (now - (m - 1 - i + end_days_ago) * DAY, v) for i, v in enumerate(staking_values)
+        ]
     detail = ProtocolDetail(
-        slug=slug, name="Test Protocol",
+        slug=slug,
+        name="Test Protocol",
         current_chain_tvls={"Ethereum": tvl_values[-1]},
-        tvl_history=tvl_hist, staking_history=staking_hist, borrowed_history=[],
+        tvl_history=tvl_hist,
+        staking_history=staking_hist,
+        borrowed_history=[],
     )
     summary = ProtocolSummary(slug=slug, name="Test Protocol", category="Test", tvl=tvl_values[-1])
     from app.analysis import metrics, scoring

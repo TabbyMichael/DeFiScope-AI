@@ -29,7 +29,7 @@ class ResearchPack:
 
     summary: ProtocolSummary | None
     detail: ProtocolDetail
-    tvl_df: "object" = field(default_factory=lambda: None)
+    tvl_df: object = field(default_factory=lambda: None)
     risk: scoring.RiskAssessment | None = None
 
     @property
@@ -50,11 +50,24 @@ class ResearchPack:
 
 
 class ProtocolResearchService:
-    def __init__(self, client: DefiLlamaClient | None = None, settings: Settings | None = None) -> None:
+    def __init__(
+        self, client: DefiLlamaClient | None = None, settings: Settings | None = None
+    ) -> None:
         self.client = client or DefiLlamaClient()
         self.settings = settings or get_settings()
         self._cache: dict[str, tuple[float, ResearchPack]] = {}
+        self._cache_max = max(1, self.settings.research_cache_max_entries)
         self._list_cache: tuple[float, dict[str, ProtocolSummary]] | None = None
+
+    def _remember(self, slug: str, pack: ResearchPack, captured_at: float) -> None:
+        """Store a pack and evict oldest entries beyond the configured cap.
+        dict preserves insertion order, so ``next(iter(...))`` is the oldest.
+        Combined with the TTL check on read, this bounds memory for long-lived
+        processes that auto-discover the whole market."""
+        self._cache[slug] = (captured_at, pack)
+        while len(self._cache) > self._cache_max:
+            oldest = next(iter(self._cache))
+            del self._cache[oldest]
 
     async def _protocol_index(self, http: httpx.AsyncClient) -> dict[str, ProtocolSummary]:
         now = time.monotonic()
@@ -70,7 +83,7 @@ class ProtocolResearchService:
         directory (market-wide monitoring). If the directory listing is
         unreachable we degrade to the curated list rather than failing the
         monitoring pass."""
-        curated = [s for s in self.settings.default_protocols.split(",") if s.strip()]
+        curated = self.settings.protocol_slugs
         n = self.settings.market_top_n
         if n <= 0:
             return curated
@@ -83,7 +96,8 @@ class ProtocolResearchService:
         excluded_slugs = self.settings.excluded_slug_set
         ranked = sorted(
             (
-                s for s in index.values()
+                s
+                for s in index.values()
                 if s.tvl is not None
                 and s.slug
                 and s.slug not in excluded_slugs
@@ -92,13 +106,15 @@ class ProtocolResearchService:
             key=lambda s: s.tvl or 0.0,
             reverse=True,
         )
-        merged = {s.strip() for s in curated if s.strip()}
+        merged = set(curated)  # protocol_slugs is already split + stripped
         for summary in ranked[:n]:
             merged.add(summary.slug)
         # Keep curated order first so alert/row ordering stays stable.
-        return curated + [s for s in sorted(merged - set(curated))]
+        return curated + sorted(merged - set(curated))
 
-    async def get_pack(self, slug: str, http: httpx.AsyncClient, refresh: bool = False) -> ResearchPack:
+    async def get_pack(
+        self, slug: str, http: httpx.AsyncClient, refresh: bool = False
+    ) -> ResearchPack:
         now = time.monotonic()
         if not refresh and slug in self._cache and now - self._cache[slug][0] < CACHE_TTL_SECONDS:
             return self._cache[slug][1]
@@ -116,7 +132,7 @@ class ProtocolResearchService:
             audits=summary.audits if summary else None,
         )
         pack = ResearchPack(summary=summary, detail=detail, tvl_df=tvl_df, risk=risk)
-        self._cache[slug] = (now, pack)
+        self._remember(slug, pack, now)
         return pack
 
     async def get_packs(self, slugs: list[str], http: httpx.AsyncClient) -> list[ResearchPack]:
@@ -153,7 +169,9 @@ def pack_to_overview(pack: ResearchPack) -> ProtocolOverview:
         change_30d=round(chg_30d, 2) if chg_30d is not None else None,
         volatility_30d=round(vol, 4) if vol is not None else None,
         top_chain=chain_info.get("top_chain"),
-        top_chain_share=round(chain_info["top_chain_share"], 4) if chain_info["total_tvl"] > 0 else None,
+        top_chain_share=round(chain_info["top_chain_share"], 4)
+        if chain_info["total_tvl"] > 0
+        else None,
         incentive_ratio=round(inc, 4) if inc is not None else None,
         risk_score=risk.composite_score if risk else None,
         risk_band=risk.band if risk else "unknown",
@@ -167,10 +185,14 @@ def pack_to_research(pack: ResearchPack, window_days: int = 180) -> ProtocolRese
     series = []
     if df is not None and not df.empty:
         tail = df.iloc[-window_days:]
-        series = [TvlPoint(date=str(idx.date()), tvl=round(float(v), 2)) for idx, v in tail["tvl"].items()]
+        series = [
+            TvlPoint(date=str(idx.date()), tvl=round(float(v), 2)) for idx, v in tail["tvl"].items()
+        ]
     chain_info = metrics.chain_concentration(pack.detail.current_chain_tvls)
     chains = [
-        ChainShare(chain=chain, tvl=round(pack.detail.current_chain_tvls[chain], 2), share=round(share, 4))
+        ChainShare(
+            chain=chain, tvl=round(pack.detail.current_chain_tvls[chain], 2), share=round(share, 4)
+        )
         for chain, share in sorted(chain_info.get("shares", {}).items(), key=lambda kv: -kv[1])
     ]
     risk = pack.risk

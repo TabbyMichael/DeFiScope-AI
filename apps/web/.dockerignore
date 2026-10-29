@@ -1,0 +1,30 @@
+# Dependencies / build output
+node_modules
+.next
+out
+coverage
+*.tsbuildinfo
+
+# Local env & secrets (NEXT_PUBLIC_* are baked in via build ARGs)
+.env
+.env.local
+.env*.local
+
+# VCS & OS
+.git
+.gitignore
+.DS_Store
+README.md
+
+# Test suites & e2e artifacts - not needed to build the Next app, and keeping
+# them out avoids invalidating the builder layer cache on every test change.
+e2e
+playwright-report
+test-results
+playwright/.cache
+playwright.config.ts
+vitest.config.ts
+vitest.setup.ts
+**/__tests__
+**/*.test.ts
+**/*.test.tsx

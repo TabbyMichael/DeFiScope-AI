@@ -11,6 +11,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import RunCheck from "@/components/run-check";
 import { api } from "@/lib/api";
 import type { Alert } from "@/lib/types";
 
@@ -40,16 +41,6 @@ async function AlertsContent() {
 
   return (
     <div className="space-y-6">
-      <header>
-        <h1 className="flex items-center gap-2 text-2xl font-semibold tracking-tight">
-          <Bell className="size-5" /> Monitoring
-        </h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Rules run every 30 minutes against DefiLlama data. Every alert shows the
-          metric, observed value and threshold that triggered it.
-        </p>
-      </header>
-
       <Card>
         <CardHeader>
           <CardTitle>Active alerts ({current.length})</CardTitle>
@@ -91,10 +82,6 @@ async function AlertsContent() {
 function AlertsFallback() {
   return (
     <div className="space-y-6">
-      <div className="space-y-2">
-        <Skeleton className="h-8 w-40" />
-        <Skeleton className="h-4 w-full max-w-2xl" />
-      </div>
       <Skeleton className="h-40" />
       <Skeleton className="h-40" />
     </div>
@@ -103,9 +90,23 @@ function AlertsFallback() {
 
 export default function AlertsPage() {
   return (
-    <Suspense fallback={<AlertsFallback />}>
-      <AlertsContent />
-    </Suspense>
+    <div className="space-y-6">
+      <header className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="flex items-center gap-2 text-2xl font-semibold tracking-tight">
+            <Bell className="size-5" /> Monitoring
+          </h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Rules run every 30 minutes against DefiLlama data. Every alert shows the
+            metric, observed value and threshold that triggered it.
+          </p>
+        </div>
+        <RunCheck />
+      </header>
+      <Suspense fallback={<AlertsFallback />}>
+        <AlertsContent />
+      </Suspense>
+    </div>
   );
 }
 

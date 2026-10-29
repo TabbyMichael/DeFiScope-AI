@@ -9,8 +9,7 @@ import {
   SidebarProvider,
   SidebarTrigger,
 } from "@/components/ui/sidebar";
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+import { API_PUBLIC_URL } from "@/lib/api";
 
 export default function DashboardLayout({
   children,
@@ -35,7 +34,7 @@ export default function DashboardLayout({
                 Methodology
               </Link>
               <a
-                href={`${API_URL}/docs`}
+                href={`${API_PUBLIC_URL}/docs`}
                 target="_blank"
                 rel="noreferrer"
                 className="text-muted-foreground hover:text-foreground"

@@ -45,14 +45,99 @@ Open http://localhost:3000. API docs at http://localhost:8000/docs.
 
 Docker alternative (api + web + Postgres): `docker compose up --build`.
 
+### Task runner
+
+The repo-root [`Makefile`](Makefile) wraps the common flows (needs `make`, `uv`,
+Node 20+). Run `make help` for the full list.
+
+```bash
+make install      # uv sync + npm install
+make api-dev      # FastAPI on :8000 with autoreload
+make web-dev      # Next.js on :3000
+make check        # lint (ruff + eslint) + typecheck + tests
+make gen-types    # regenerate openapi.json + frontend API types
+make compose      # full stack via docker compose
+make e2e          # Playwright e2e (needs `make compose` running first)
+make tunnel       # publish the running app on a public Cloudflare URL
+```
+
+## Sharing the app (public link)
+
+Want to send a working link to someone outside your machine? The repo ships a
+[`scripts/tunnel.sh`](scripts/tunnel.sh) helper that opens a free
+[Cloudflare Quick Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/do-more-with-tunnels/trycloudflare/)
+and prints a public `https://<random-words>.trycloudflare.com` URL — no account,
+no port forwarding, no firewall rules.
+
+Run it **after** the app is already up (either mode works):
+
+```bash
+# 1. Start the stack (pick one) …
+make compose                 # docker (web :4000, api :3646)
+#   …or: make api-dev  +  make web-dev   # local dev (web :3000, api :8000)
+
+# 2. …then publish it
+make tunnel
+#   or directly:
+bash scripts/tunnel.sh
+```
+
+The helper auto-detects which ports are live (docker first, then dev), reuses an
+installed `cloudflared` or downloads one into `.cloudflared-bin/` otherwise, and
+tunnels both the web app and the API. Press `Ctrl+C` to stop sharing.
+
+Useful flags / env:
+
+```bash
+bash scripts/tunnel.sh --web 4000     # force the web port (must match where the app listens)
+bash scripts/tunnel.sh --api 8000     # force the API port
+bash scripts/tunnel.sh --no-api       # tunnel only the web app
+WEB_PORT=4000 API_PORT=3646 bash scripts/tunnel.sh
+bash scripts/tunnel.sh --help
+```
+
+### Sharing on a non-default port
+
+If you'd rather not use Next's default `:3000`, start the dev server on any free
+port and tunnel that **same** port:
+
+```bash
+# terminal 1 - web app on :4000 (not :3000)
+cd apps/web
+npm run dev -- -p 4000
+
+# terminal 2 - expose the same port
+bash scripts/tunnel.sh --web 4000
+```
+
+A running tunnel can't switch ports — press `Ctrl+C` and relaunch with the new
+`--web <port>` (a fresh URL is issued every run). If you use Docker instead, web
+is already on `:4000` and the API on `:3646`, so plain `make tunnel` targets
+those without any flags.
+
+Notes:
+- **Ephemeral URL.** Quick-tunnel addresses change on every run and only live as
+  long as the script runs. For a stable custom domain, use a named
+  `cloudflared tunnel` with your own Cloudflare account instead.
+- **Dashboard data flows through the web tunnel** (the Next server calls the API
+  server-side), so external users get the full app from the single web URL.
+- The in-app **"API" docs link** is baked at build time to a `localhost` address,
+  so share the separate API tunnel URL printed by the script for anyone who needs
+  the raw OpenAPI docs.
+
 ## Tests
 
 ```bash
-cd services/api && uv run pytest
+make test         # or: cd services/api && uv run pytest
 ```
 
-41 tests covering metric primitives, risk scoring behavior, alert rules, and
-API contracts against mocked DefiLlama responses (respx) — no live network.
+Backend (pytest) + frontend (Vitest) suites cover metric primitives, risk
+scoring, alert rules, DB-first dashboard reads, API contracts against mocked
+DefiLlama responses (respx) and generated-type drift — no live network.
+
+End-to-end (Playwright) specs live in [`apps/web/e2e`](apps/web/e2e) and run
+against a full stack — bring it up with `make compose`, then `make e2e`
+(the smoke suite tolerates an empty dataset while the startup warm-up runs).
 
 ## Design principles
 

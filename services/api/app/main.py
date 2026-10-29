@@ -8,18 +8,17 @@ from contextlib import asynccontextmanager
 
 import httpx
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import text
 
 from app.config import get_settings
-from app.db import SessionLocal, init_db
+from app.db import SessionLocal, engine, init_db
 from app.routers import alerts, briefs, dashboard, protocols
 from app.services.protocols import ProtocolResearchService
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
 logger = logging.getLogger("defiscope")
-
-settings = get_settings()
 
 
 async def alerts_alert_run(state) -> list:
@@ -36,7 +35,7 @@ async def alerts_alert_run(state) -> list:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     app.state.http = httpx.AsyncClient(
-        timeout=settings.http_timeout_seconds,
+        timeout=get_settings().http_timeout_seconds,
         headers={"User-Agent": "DeFiScope-AI/0.1 (research tool)"},
     )
     app.state.research_service = ProtocolResearchService()
@@ -80,12 +79,7 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
-        "http://localhost:3001",
-        "http://127.0.0.1:3001",
-    ],
+    allow_origins=get_settings().cors_origin_list,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -96,6 +90,27 @@ app.include_router(alerts.router)
 app.include_router(dashboard.router)
 
 
+def _db_status() -> str:
+    """Cheap connectivity probe: 'ok' if the database answers SELECT 1."""
+    try:
+        with engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+        return "ok"
+    except Exception as exc:  # noqa: BLE001 - report, never crash the probe
+        logger.warning("DB health check failed: %s", exc)
+        return "error"
+
+
 @app.get("/api/health", tags=["meta"])
 async def health():
-    return {"status": "ok", "protocols": settings.protocol_slugs}
+    # Liveness: always 200 so a transient DB blip doesn't restart the container,
+    # but surface the DB state for observability.
+    return {"status": "ok", "db": _db_status(), "protocols": get_settings().protocol_slugs}
+
+
+@app.get("/api/health/ready", tags=["meta"])
+async def ready():
+    # Readiness: 503 until the database is reachable, for compose/k8s probes.
+    if _db_status() != "ok":
+        raise HTTPException(status_code=503, detail="database unavailable")
+    return {"status": "ready"}

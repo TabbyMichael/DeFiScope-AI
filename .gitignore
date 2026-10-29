@@ -20,3 +20,6 @@ out/
 
 # OS
 .DS_Store
+
+# Cloudflare tunnel helper: locally-downloaded cloudflared binary
+.cloudflared-bin/

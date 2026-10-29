@@ -4,7 +4,6 @@ import time
 
 import pandas as pd
 import pytest
-
 from app.analysis import metrics
 
 
@@ -82,10 +81,16 @@ class TestChainConcentration:
         assert info["top_chain"] == "Ethereum"
 
     def test_ignores_composite_and_non_chain_keys(self):
-        info = metrics.chain_concentration({
-            "Ethereum": 80.0, "Arbitrum": 20.0,
-            "Ethereum-staking": 500.0, "staking": 400.0, "pool2": 10.0, "borrowed": 999.0,
-        })
+        info = metrics.chain_concentration(
+            {
+                "Ethereum": 80.0,
+                "Arbitrum": 20.0,
+                "Ethereum-staking": 500.0,
+                "staking": 400.0,
+                "pool2": 10.0,
+                "borrowed": 999.0,
+            }
+        )
         assert info["total_tvl"] == pytest.approx(100.0)
         assert info["top_chain_share"] == pytest.approx(0.8)
 
