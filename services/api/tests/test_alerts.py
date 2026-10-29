@@ -14,6 +14,8 @@ def make_pack(
     staking_values: list[float] | None = None,
     end_days_ago: int = 0,
     slug: str = "test-protocol",
+    minted_symbols: list[str] | None = None,
+    peg_histories: dict[str, list[tuple[int, float]]] | None = None,
 ) -> ResearchPack:
     now = int(time.time())
     n = len(tvl_values)
@@ -36,8 +38,30 @@ def make_pack(
     from app.analysis import metrics, scoring
 
     df = metrics.series_to_frame(tvl_hist)
-    risk = scoring.assess(slug, df, detail.current_chain_tvls, tvl_hist, staking_hist, "1")
-    return ResearchPack(summary=summary, detail=detail, tvl_df=df, risk=risk)
+    risk = scoring.assess(
+        slug,
+        df,
+        detail.current_chain_tvls,
+        tvl_hist,
+        staking_hist,
+        "1",
+        minted_symbols=minted_symbols or [],
+        peg_histories=peg_histories or {},
+    )
+    return ResearchPack(
+        summary=summary,
+        detail=detail,
+        tvl_df=df,
+        risk=risk,
+        minted_symbols=minted_symbols or [],
+        peg_histories=peg_histories or {},
+    )
+
+
+def price_series(values: list[float]) -> list[tuple[int, float]]:
+    now = int(time.time())
+    n = len(values)
+    return [(now - (n - 1 - i) * DAY, v) for i, v in enumerate(values)]
 
 
 class TestTvlDrop:
@@ -104,3 +128,32 @@ class TestDeterminism:
         a = alerts.evaluate_pack(pack)[0]
         assert a.triggered_at
         assert {"metric", "observed", "threshold"} <= set(a.evidence)
+
+
+class TestDepeg:
+    def test_depegged_minted_coin_fires_critical(self):
+        # DAI trading ~500 bps off peg (>= 2x the 50 bps threshold) => critical.
+        pack = make_pack(
+            [1000.0] * 40,
+            minted_symbols=["DAI"],
+            peg_histories={"DAI": price_series([0.99, 0.95, 0.98])},
+        )
+        depeg = [a for a in alerts.evaluate_pack(pack) if a.rule == "depeg"]
+        assert len(depeg) == 1
+        assert depeg[0].severity == "critical"
+        assert depeg[0].evidence["asset"] == "DAI"
+        assert depeg[0].evidence["observed"] >= 50
+
+    def test_on_peg_minted_coin_is_quiet(self):
+        pack = make_pack(
+            [1000.0] * 40,
+            minted_symbols=["DAI"],
+            peg_histories={"DAI": price_series([0.9999, 1.0001, 0.9998])},
+        )
+        assert [a for a in alerts.evaluate_pack(pack) if a.rule == "depeg"] == []
+
+    def test_non_issuer_is_quiet_not_silently_safe(self):
+        # A protocol that mints no tracked coin produces no depeg alert (the
+        # scorer surfaces it as an excluded data gap, not a low-risk pass).
+        pack = make_pack([1000.0] * 40)
+        assert [a for a in alerts.evaluate_pack(pack) if a.rule == "depeg"] == []

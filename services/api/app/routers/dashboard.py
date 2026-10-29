@@ -7,8 +7,8 @@ from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy.orm import Session
 
 from app.db import get_session
-from app.schemas import DashboardResponse, TvlPoint
-from app.services.dashboard import get_dashboard, history
+from app.schemas import DashboardResponse, RiskPoint, TvlPoint
+from app.services.dashboard import get_dashboard, history, risk_history
 
 router = APIRouter(tags=["dashboard"])
 
@@ -44,3 +44,16 @@ async def protocol_history(
     session: Session = Depends(session_dep),
 ):
     return history(session, slug, days)
+
+
+@router.get("/api/protocols/{slug}/risk-history", response_model=list[RiskPoint])
+async def protocol_risk_history(
+    slug: str,
+    days: int = Query(90, ge=1, le=365, description="trailing scored days"),
+    session: Session = Depends(session_dep),
+):
+    """Daily composite risk-score trend for one protocol (DB read, no crawl).
+
+    Only days the scheduler actually scored are returned, so the series reflects
+    real observed risk rather than the null-scored DefiLlama backfill rows."""
+    return risk_history(session, slug, days)

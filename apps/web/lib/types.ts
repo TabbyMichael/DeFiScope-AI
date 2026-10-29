@@ -23,6 +23,7 @@ type DeepRequired<T> = T extends Array<infer U>
     : T;
 
 export type TvlPoint = DeepRequired<Schemas["TvlPoint"]>;
+export type RiskPoint = DeepRequired<Schemas["RiskPoint"]>;
 export type ProtocolOverview = DeepRequired<Schemas["ProtocolOverview"]>;
 export type ChainShare = DeepRequired<Schemas["ChainShare"]>;
 export type RiskIndicator = DeepRequired<Schemas["RiskIndicatorOut"]>;

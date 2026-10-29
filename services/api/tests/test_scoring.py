@@ -19,6 +19,9 @@ def make_assessment(
     staking_values: list[float] | None = None,
     slug: str = "test-protocol",
     audits: str | None = "2",
+    fees_30d: float | None = None,
+    minted_symbols: list[str] | None = None,
+    peg_histories: dict[str, list[tuple[int, float]]] | None = None,
 ) -> scoring.RiskAssessment:
     tvl_history = daily_series(tvl_values)
     df = metrics.series_to_frame(tvl_history)
@@ -29,6 +32,9 @@ def make_assessment(
         tvl_history=tvl_history,
         staking_history=daily_series(staking_values) if staking_values else [],
         audits=audits,
+        fees_30d=fees_30d,
+        minted_symbols=minted_symbols,
+        peg_histories=peg_histories,
     )
 
 
@@ -114,3 +120,80 @@ class TestScoreMapping:
         # inverted direction: safe_at > risky_at
         assert scoring._linear_score(100, 100, 0) == 0.0
         assert scoring._linear_score(0, 100, 0) == 100.0
+
+
+class TestWeightRebalance:
+    def test_indicator_weights_sum_to_one(self):
+        # The scorer renormalizes over available indicators, so the declared
+        # weights must still sum to 1.0 across the full set.
+        result = make_assessment(
+            tvl_values=[1000] * 60,
+            chain_tvls={"Ethereum": 500.0, "Arbitrum": 500.0},
+            staking_values=[10] * 60,
+            fees_30d=500.0,
+        )
+        assert len(result.indicators) == 7
+        assert round(sum(i.weight for i in result.indicators), 6) == 1.0
+
+
+class TestRealYieldDependence:
+    def test_missing_fee_data_is_gap_not_safe(self):
+        result = make_assessment([1000] * 60, {"Ethereum": 100.0})  # no fees_30d
+        by_key = {i.key: i for i in result.indicators}
+        assert by_key["real_yield_dependence"].score is None
+        assert "real_yield_dependence" in result.data_gaps
+
+    def test_high_fee_yield_lowers_risk(self):
+        # TVL ~1000 flat; 30d fees of 300 => 30% of TVL => plenty of real yield.
+        low = make_assessment([1000] * 60, {"Ethereum": 100.0}, fees_30d=300.0)
+        ly = {i.key: i for i in low.indicators}["real_yield_dependence"]
+        assert ly.score is not None
+        assert ly.score < 20
+
+    def test_negligible_fees_raise_risk(self):
+        # Same TVL but almost no fee revenue => TVL not backed by organic yield.
+        high = make_assessment([1000] * 60, {"Ethereum": 100.0}, fees_30d=0.5)
+        hy = {i.key: i for i in high.indicators}["real_yield_dependence"]
+        assert hy.score is not None
+        assert hy.score > 80
+
+
+class TestDepegExposure:
+    def test_non_issuer_is_gap_not_safe(self):
+        result = make_assessment([1000] * 60, {"Ethereum": 100.0})  # no minted coins
+        by_key = {i.key: i for i in result.indicators}
+        assert by_key["depeg_exposure"].score is None
+        assert "depeg_exposure" in result.data_gaps
+
+    def test_issuer_without_price_data_is_gap(self):
+        result = make_assessment(
+            [1000] * 60,
+            {"Ethereum": 100.0},
+            minted_symbols=["DAI"],
+            peg_histories={},  # mints DAI but no price history came back
+        )
+        by_key = {i.key: i for i in result.indicators}
+        assert by_key["depeg_exposure"].score is None
+        assert "depeg_exposure" in result.data_gaps
+
+    def test_on_peg_issuer_scores_low(self):
+        result = make_assessment(
+            [1000] * 60,
+            {"Ethereum": 100.0},
+            minted_symbols=["DAI"],
+            peg_histories={"DAI": daily_series([0.9999] * 60)},
+        )
+        by_key = {i.key: i for i in result.indicators}
+        assert by_key["depeg_exposure"].score is not None
+        assert by_key["depeg_exposure"].score < 10
+
+    def test_depegged_issuer_scores_high(self):
+        result = make_assessment(
+            [1000] * 60,
+            {"Ethereum": 100.0},
+            minted_symbols=["DAI"],
+            peg_histories={"DAI": daily_series([0.95] * 60)},  # 500 bps off peg
+        )
+        by_key = {i.key: i for i in result.indicators}
+        assert by_key["depeg_exposure"].score is not None
+        assert by_key["depeg_exposure"].score > 90

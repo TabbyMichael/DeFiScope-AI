@@ -84,6 +84,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/briefs/{slug}/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Export Brief
+         * @description Render the brief for download as Markdown, CSV or PDF.
+         *
+         *     Returns raw bytes with a ``Content-Disposition: attachment`` header so the
+         *     browser saves the file. Unknown formats are a 400; an unfetchable protocol
+         *     is a 404 (mirrors the JSON brief endpoint). The web app proxies this through
+         *     a same-origin route handler so the compose-internal API URL stays server-side.
+         */
+        get: operations["export_brief_api_briefs__slug__export_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/dashboard": {
         parameters: {
             query?: never;
@@ -182,6 +207,29 @@ export interface paths {
         };
         /** Protocol History */
         get: operations["protocol_history_api_protocols__slug__history_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/protocols/{slug}/risk-history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Protocol Risk History
+         * @description Daily composite risk-score trend for one protocol (DB read, no crawl).
+         *
+         *     Only days the scheduler actually scored are returned, so the series reflects
+         *     real observed risk rather than the null-scored DefiLlama backfill rows.
+         */
+        get: operations["protocol_risk_history_api_protocols__slug__risk_history_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -311,10 +359,22 @@ export interface components {
             change_30d?: number | null;
             /** Change 7D */
             change_7d?: number | null;
+            /** Depeg Asset */
+            depeg_asset?: string | null;
+            /** Depeg Worst Bps */
+            depeg_worst_bps?: number | null;
+            /** Fees 1D */
+            fees_1d?: number | null;
+            /** Fees 30D */
+            fees_30d?: number | null;
+            /** Fees Tvl */
+            fees_tvl?: number | null;
             /** Incentive Ratio */
             incentive_ratio?: number | null;
             /** Name */
             name: string;
+            /** Revenue 1D */
+            revenue_1d?: number | null;
             /**
              * Risk Band
              * @default unknown
@@ -341,6 +401,10 @@ export interface components {
             tvl?: number | null;
             /** Volatility 30D */
             volatility_30d?: number | null;
+            /** Volume 1D */
+            volume_1d?: number | null;
+            /** Volume Tvl */
+            volume_tvl?: number | null;
         };
         /** ProtocolResearch */
         ProtocolResearch: {
@@ -421,6 +485,22 @@ export interface components {
             value: number | null;
             /** Weight */
             weight: number;
+        };
+        /**
+         * RiskPoint
+         * @description One daily risk-score observation from ``protocol_snapshots``.
+         *
+         *     Only rows the scheduler actually scored carry a ``score``/``band``; the
+         *     deep DefiLlama backfill seeds TVL history without re-scoring every day, so
+         *     those are excluded from the trend rather than plotted as zero.
+         */
+        RiskPoint: {
+            /** Band */
+            band?: string | null;
+            /** Date */
+            date: string;
+            /** Score */
+            score?: number | null;
         };
         /** TvlPoint */
         TvlPoint: {
@@ -552,6 +632,38 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["ResearchBrief"];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    export_brief_api_briefs__slug__export_get: {
+        parameters: {
+            query?: {
+                /** @description download format: md | csv | pdf */
+                format?: string;
+            };
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {
@@ -696,6 +808,40 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TvlPoint"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    protocol_risk_history_api_protocols__slug__risk_history_get: {
+        parameters: {
+            query?: {
+                /** @description trailing scored days */
+                days?: number;
+            };
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RiskPoint"][];
                 };
             };
             /** @description Validation Error */

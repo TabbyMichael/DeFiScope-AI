@@ -16,6 +16,7 @@ dependencies = [
     "apscheduler>=3.10",
     "python-dateutil>=2.9",
     "alembic>=1.20.1",
+    "reportlab>=5.1.0",
 ]
 
 [dependency-groups]

@@ -81,6 +81,10 @@ class AlertRecord(Base):
     message = Column(String)
     evidence = Column(JSON)
     triggered_at = Column(String)
+    # Delivery marker: when this alert was last fanned out to notifiers. Null
+    # until first send; drives the cooldown/dedup so re-runs and the 30-min
+    # scheduler do not spam the same protocol/rule/day alert.
+    notified_at = Column(DateTime(timezone=True))
 
 
 _settings = get_settings()

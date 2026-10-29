@@ -10,13 +10,14 @@ from __future__ import annotations
 
 import hashlib
 import logging
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy.orm import Session
 
 from app.analysis import metrics
 from app.config import get_settings
 from app.db import AlertRecord, ProtocolSnapshot
+from app.notifiers import Notification, build_notifiers, severity_at_least
 from app.schemas import Alert
 from app.services.protocols import (
     ProtocolResearchService,
@@ -179,6 +180,49 @@ def evaluate_pack(pack: ResearchPack) -> list[Alert]:
             )
         )
 
+    # Depeg watch: flag when a stablecoin this protocol mints drifts further
+    # from its $1 peg than the configured tolerance within the lookback window.
+    # Only runs for issuers in the curated map; a protocol that mints no tracked
+    # coin produces no alert here (silence means "not applicable", not "on peg").
+    if pack.minted_symbols:
+        worst: float | None = None
+        worst_coin: str | None = None
+        for sym in pack.minted_symbols:
+            d = metrics.max_peg_deviation_bps(pack.peg_histories.get(sym, []))
+            if d is None:
+                continue
+            if worst is None or d > worst:
+                worst = d
+                worst_coin = sym
+        if worst is not None and worst >= settings.alert_depeg_bps and worst_coin is not None:
+            days = metrics.depeg_duration(
+                pack.peg_histories.get(worst_coin, []), settings.alert_depeg_bps
+            )
+            severity = "critical" if worst >= settings.alert_depeg_bps * 2 else "warning"
+            alerts.append(
+                Alert(
+                    id=_alert_id(pack.slug, "depeg", day),
+                    slug=pack.slug,
+                    protocol=name,
+                    rule="depeg",
+                    severity=severity,
+                    message=(
+                        f"{name}: its stablecoin {worst_coin} traded {worst:.0f} bps "
+                        f"off its $1 peg in the last {settings.depeg_window_days}d "
+                        f"(threshold {settings.alert_depeg_bps:.0f} bps)."
+                    ),
+                    evidence={
+                        "metric": "max_peg_deviation_bps",
+                        "asset": worst_coin,
+                        "observed": round(worst, 1),
+                        "threshold": settings.alert_depeg_bps,
+                        "observations_out_of_band": days,
+                        "window_days": settings.depeg_window_days,
+                    },
+                    triggered_at=now.isoformat(),
+                )
+            )
+
     return alerts
 
 
@@ -286,10 +330,86 @@ def backfill_history(session: Session, pack: ResearchPack) -> None:
     session.commit()
 
 
+async def notify_new_alerts(
+    session: Session,
+    alerts: list[Alert],
+    http,
+    settings=None,
+) -> int:
+    """Fan out *new* alerts to the configured delivery channels.
+
+    Called after ``persist_alerts`` in a monitoring pass. Two guards keep
+    delivery honest and non-spammy:
+
+    * **severity gate** - alerts below ``alert_notify_min_severity`` are skipped.
+    * **cooldown/dedup** - keyed on the deterministic ``alert-{slug}-{rule}-{day}``
+      id via the ``notified_at`` marker, so a 30-min scheduler tick or manual
+      re-run never re-sends the same day's alert until the window elapses.
+
+    Delivery is best-effort: a channel raising is logged and swallowed so one
+    bad endpoint can't abort the pass or crash the scheduler. The alert is still
+    marked notified (it was attempted) once at least one notifier exists.
+    Returns the number of alerts dispatched.
+    """
+    settings = settings or get_settings()
+    if not settings.alert_notify_enabled or not alerts:
+        return 0
+
+    eligible = [
+        a for a in alerts if severity_at_least(a.severity, settings.alert_notify_min_severity)
+    ]
+    if not eligible:
+        return 0
+
+    now = datetime.now(UTC)
+    cooldown = timedelta(minutes=settings.alert_notify_cooldown_minutes)
+    to_send: list[Alert] = []
+    for a in eligible:
+        row = session.get(AlertRecord, a.id)
+        last = row.notified_at if row is not None else None
+        if last is not None:
+            if last.tzinfo is None:  # SQLite returns naive timestamps
+                last = last.replace(tzinfo=UTC)
+            if now - last < cooldown:
+                continue
+        to_send.append(a)
+    if not to_send:
+        return 0
+
+    notifiers = build_notifiers(settings)
+    if not notifiers:
+        return 0  # nothing to deliver to (e.g. webhook-only without a URL)
+
+    notes = [Notification.from_alert(a) for a in to_send]
+    for notifier in notifiers:
+        for note in notes:
+            try:
+                await notifier.send(http, note)
+            except Exception as exc:  # noqa: BLE001 - one bad channel must not abort the pass
+                # Log only the exception TYPE, never str(exc): httpx's
+                # raise_for_status() embeds the full request URL, which for
+                # Telegram/Slack/Discord/webhook carries the secret token.
+                logger.warning(
+                    "Notifier %s failed for %s: %s",
+                    notifier.name,
+                    note.id,
+                    type(exc).__name__,
+                )
+
+    # Mark dispatched so the next pass honours the cooldown.
+    for a in to_send:
+        row = session.get(AlertRecord, a.id)
+        if row is not None:
+            row.notified_at = now
+    session.commit()
+    return len(to_send)
+
+
 async def run_monitor(svc: ProtocolResearchService, http, session: Session) -> list[Alert]:
     """Full monitoring pass: fetch the watchlist (curated + top-of-market auto
-    discovery), evaluate rules, persist alerts and daily snapshots. Called by
-    the scheduler and the manual trigger endpoint."""
+    discovery), evaluate rules, persist alerts and daily snapshots, then fan
+    new alerts out to any configured delivery channels. Called by the scheduler
+    and the manual trigger endpoint."""
     slugs = await svc.watchlist_slugs(http)
     packs = await svc.get_packs(slugs, http)
     alerts: list[Alert] = []
@@ -299,6 +419,7 @@ async def run_monitor(svc: ProtocolResearchService, http, session: Session) -> l
         except Exception as exc:  # noqa: BLE001 - keep monitoring resilient
             logger.warning("Alert evaluation failed for %s: %s", pack.slug, exc)
     persist_alerts(session, alerts)
+    await notify_new_alerts(session, alerts, http)
     for pack in packs:
         backfill_history(session, pack)  # seed full history on first sight
     persist_snapshots(session, packs)

@@ -113,6 +113,64 @@ class TestIncentiveRatio:
         assert metrics.incentive_ratio(daily_series([100] * 5), []) is None
 
 
+class TestCapitalEfficiency:
+    def test_fees_tvl_ratio(self):
+        assert metrics.fees_tvl_ratio(1000.0, 100_000.0) == pytest.approx(0.01)
+
+    def test_volume_tvl_ratio(self):
+        assert metrics.volume_tvl_ratio(50_000.0, 100_000.0) == pytest.approx(0.5)
+
+    def test_missing_value_is_gap_not_zero(self):
+        assert metrics.fees_tvl_ratio(None, 100_000.0) is None
+        assert metrics.volume_tvl_ratio(1000.0, None) is None
+        assert metrics.ratio_to_tvl(1000.0, 0.0) is None
+
+
+class TestPriceNormalizedTvl:
+    def test_pure_price_move_normalizes_to_zero(self):
+        # TVL doubles while the token price also doubles -> usage unchanged.
+        tvl = daily_series([1000, 2000])
+        price = daily_series([10, 20])
+        assert metrics.price_normalized_tvl(tvl, price) == pytest.approx(0.0, abs=1e-6)
+
+    def test_real_usage_growth_survives_normalization(self):
+        # TVL +100% but price flat -> genuine 100% usage growth.
+        tvl = daily_series([1000, 2000])
+        price = daily_series([10, 10])
+        assert metrics.price_normalized_tvl(tvl, price) == pytest.approx(100.0)
+
+    def test_missing_price_returns_none(self):
+        assert metrics.price_normalized_tvl(daily_series([1000, 2000]), []) is None
+
+    def test_empty_returns_none(self):
+        assert metrics.price_normalized_tvl([], []) is None
+
+
+class TestPegDeviation:
+    def test_signed_deviation_bps(self):
+        assert metrics.peg_deviation_bps(0.99, 1.0) == pytest.approx(-100.0)
+        assert metrics.peg_deviation_bps(1.0) == pytest.approx(0.0)
+
+    def test_missing_price_is_gap(self):
+        assert metrics.peg_deviation_bps(None) is None
+
+    def test_max_deviation_takes_worst_case(self):
+        hist = daily_series([1.0, 0.995, 1.01, 1.0])
+        # deviations 0 / -50 / +100 bps -> worst magnitude is 100
+        assert metrics.max_peg_deviation_bps(hist) == pytest.approx(100.0)
+
+    def test_max_deviation_empty_is_none(self):
+        assert metrics.max_peg_deviation_bps([]) is None
+
+    def test_duration_counts_out_of_band_observations(self):
+        hist = daily_series([1.0, 0.99, 0.995, 1.0])
+        # 100 bps and 50 bps excursions; tolerance 60 keeps only the 100 bps point
+        assert metrics.depeg_duration(hist, tolerance_bps=60) == 1
+
+    def test_duration_empty_is_none(self):
+        assert metrics.depeg_duration([], 50) is None
+
+
 class TestFreshness:
     def test_fresh_data(self):
         df = metrics.series_to_frame(daily_series([100, 101]))

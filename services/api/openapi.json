@@ -304,6 +304,61 @@
             ],
             "title": "Change 7D"
           },
+          "depeg_asset": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Depeg Asset"
+          },
+          "depeg_worst_bps": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Depeg Worst Bps"
+          },
+          "fees_1d": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fees 1D"
+          },
+          "fees_30d": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fees 30D"
+          },
+          "fees_tvl": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fees Tvl"
+          },
           "incentive_ratio": {
             "anyOf": [
               {
@@ -318,6 +373,17 @@
           "name": {
             "title": "Name",
             "type": "string"
+          },
+          "revenue_1d": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revenue 1D"
           },
           "risk_band": {
             "default": "unknown",
@@ -405,6 +471,28 @@
               }
             ],
             "title": "Volatility 30D"
+          },
+          "volume_1d": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Volume 1D"
+          },
+          "volume_tvl": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Volume Tvl"
           }
         },
         "required": [
@@ -638,6 +726,42 @@
         "title": "RiskIndicatorOut",
         "type": "object"
       },
+      "RiskPoint": {
+        "description": "One daily risk-score observation from ``protocol_snapshots``.\n\nOnly rows the scheduler actually scored carry a ``score``/``band``; the\ndeep DefiLlama backfill seeds TVL history without re-scoring every day, so\nthose are excluded from the trend rather than plotted as zero.",
+        "properties": {
+          "band": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Band"
+          },
+          "date": {
+            "title": "Date",
+            "type": "string"
+          },
+          "score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Score"
+          }
+        },
+        "required": [
+          "date"
+        ],
+        "title": "RiskPoint",
+        "type": "object"
+      },
       "TvlPoint": {
         "properties": {
           "date": {
@@ -868,6 +992,54 @@
         ]
       }
     },
+    "/api/briefs/{slug}/export": {
+      "get": {
+        "description": "Render the brief for download as Markdown, CSV or PDF.\n\nReturns raw bytes with a ``Content-Disposition: attachment`` header so the\nbrowser saves the file. Unknown formats are a 400; an unfetchable protocol\nis a 404 (mirrors the JSON brief endpoint). The web app proxies this through\na same-origin route handler so the compose-internal API URL stays server-side.",
+        "operationId": "export_brief_api_briefs__slug__export_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          },
+          {
+            "description": "download format: md | csv | pdf",
+            "in": "query",
+            "name": "format",
+            "required": false,
+            "schema": {
+              "default": "md",
+              "description": "download format: md | csv | pdf",
+              "title": "Format",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Export Brief",
+        "tags": [
+          "briefs"
+        ]
+      }
+    },
     "/api/dashboard": {
       "get": {
         "description": "Latest snapshot per protocol + aggregate stats + alert feed, all read\nfrom the DB. Hydrates from DefiLlama only when the DB is empty/stale.",
@@ -1050,6 +1222,67 @@
           }
         },
         "summary": "Protocol History",
+        "tags": [
+          "dashboard"
+        ]
+      }
+    },
+    "/api/protocols/{slug}/risk-history": {
+      "get": {
+        "description": "Daily composite risk-score trend for one protocol (DB read, no crawl).\n\nOnly days the scheduler actually scored are returned, so the series reflects\nreal observed risk rather than the null-scored DefiLlama backfill rows.",
+        "operationId": "protocol_risk_history_api_protocols__slug__risk_history_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          },
+          {
+            "description": "trailing scored days",
+            "in": "query",
+            "name": "days",
+            "required": false,
+            "schema": {
+              "default": 90,
+              "description": "trailing scored days",
+              "maximum": 365,
+              "minimum": 1,
+              "title": "Days",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/RiskPoint"
+                  },
+                  "title": "Response Protocol Risk History Api Protocols  Slug  Risk History Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Protocol Risk History",
         "tags": [
           "dashboard"
         ]

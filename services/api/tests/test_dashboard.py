@@ -143,6 +143,46 @@ class TestHistory:
         assert series[-1].date == dates[-1]
 
 
+class TestRiskHistory:
+    def _row(self, slug, date, score, band="moderate"):
+        return ProtocolSnapshot(
+            slug=slug,
+            date=date,
+            name=slug,
+            tvl=100.0,
+            risk_score=score,
+            risk_band=band if score is not None else None,
+            captured_at=_now(),
+        )
+
+    def test_excludes_unscored_backfill_rows(self, session):
+        # Every other day is unscored (simulates the DefiLlama backfill).
+        dates = [f"2026-01-{d:02d}" for d in range(1, 11)]
+        session.add_all(
+            [self._row("a", d, (40.0 + i if i % 2 == 0 else None)) for i, d in enumerate(dates)]
+        )
+        session.commit()
+        series = dashboard.risk_history(session, "a", days=90)
+        assert len(series) == 5
+        assert all(p.score is not None for p in series)
+        # ascending by date
+        assert [p.date for p in series] == sorted(p.date for p in series)
+
+    def test_trailing_window(self, session):
+        dates = [f"2026-01-{d:02d}" for d in range(1, 41)]
+        session.add_all([self._row("a", d, 10.0, band="low") for d in dates])
+        session.commit()
+        series = dashboard.risk_history(session, "a", days=30)
+        assert len(series) == 30
+        assert series[0].date == "2026-01-11"
+        assert series[-1].date == dates[-1]
+
+    def test_empty_when_no_scores(self, session):
+        session.add(self._row("a", "2026-01-01", None))
+        session.commit()
+        assert dashboard.risk_history(session, "a") == []
+
+
 class TestDashboardFallback:
     async def test_empty_db_triggers_monitor_then_reads_db(self, session, monkeypatch):
         calls = {"n": 0}

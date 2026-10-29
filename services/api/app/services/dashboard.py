@@ -22,6 +22,7 @@ from app.schemas import (
     DashboardStats,
     Mover,
     ProtocolOverview,
+    RiskPoint,
     TvlPoint,
 )
 
@@ -137,6 +138,25 @@ def history(session: Session, slug: str, days: int = 30) -> list[TvlPoint]:
         .all()
     )
     return [TvlPoint(date=r.date, tvl=round(r.tvl or 0.0, 2)) for r in reversed(rows)]
+
+
+def risk_history(session: Session, slug: str, days: int = 90) -> list[RiskPoint]:
+    """Trailing daily risk-score observations for one protocol.
+
+    Filters to rows that actually carry a ``risk_score``: the initial DefiLlama
+    backfill seeds historical TVL days without re-scoring them (score is null),
+    so including those would plot a misleading flat/zero baseline. The result is
+    the genuine trend of the composite score over the days the scheduler ran.
+    Ascending by date."""
+    rows = (
+        session.query(ProtocolSnapshot)
+        .filter(ProtocolSnapshot.slug == slug)
+        .filter(ProtocolSnapshot.risk_score.isnot(None))
+        .order_by(ProtocolSnapshot.date.desc())
+        .limit(days)
+        .all()
+    )
+    return [RiskPoint(date=r.date, score=r.risk_score, band=r.risk_band) for r in reversed(rows)]
 
 
 def aggregate_history(session: Session, days: int = 90) -> list[TvlPoint]:

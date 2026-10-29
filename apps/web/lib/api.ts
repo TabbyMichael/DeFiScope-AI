@@ -4,6 +4,7 @@ import type {
   ProtocolOverview,
   ProtocolResearch,
   ResearchBrief,
+  RiskPoint,
   TvlPoint,
 } from "./types";
 
@@ -84,6 +85,10 @@ export const api = {
   protocol: (slug: string) => get<ProtocolResearch>(`/api/protocols/${encodeURIComponent(slug)}`),
   protocolHistory: (slug: string, days = 30) =>
     get<TvlPoint[]>(`/api/protocols/${encodeURIComponent(slug)}/history?days=${days}`),
+  riskHistory: (slug: string, days = 90) =>
+    get<RiskPoint[]>(
+      `/api/protocols/${encodeURIComponent(slug)}/risk-history?days=${days}`,
+    ),
   brief: (slug: string) =>
     get<ResearchBrief>(`/api/briefs/${encodeURIComponent(slug)}`, 3600, BRIEF_TIMEOUT_MS),
   alerts: () => get<Alert[]>("/api/alerts"),
@@ -91,6 +96,20 @@ export const api = {
   // Trigger a full monitoring pass server-side (invoked via the route handler).
   runAlerts: () => post<Alert[]>("/api/alerts/run", RUN_TIMEOUT_MS),
 };
+
+/**
+ * Fetch a rendered brief export (md | csv | pdf) as raw bytes from the
+ * server-only API. Called only by the same-origin `/api/brief-export/[slug]`
+ * route handler, so the compose-internal `API_URL` is never exposed to the
+ * browser. The upstream `Response` is returned un-parsed so the handler can
+ * forward `Content-Type` / `Content-Disposition` straight to the client.
+ */
+export async function fetchBriefExport(slug: string, format: string): Promise<Response> {
+  return fetch(
+    `${API_URL}/api/briefs/${encodeURIComponent(slug)}/export?format=${encodeURIComponent(format)}`,
+    { cache: "no-store", signal: AbortSignal.timeout(BRIEF_TIMEOUT_MS) },
+  );
+}
 
 export function fmtUsd(value: number | null | undefined): string {
   if (value == null) return "—";
