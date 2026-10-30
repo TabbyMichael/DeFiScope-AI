@@ -1,5 +1,6 @@
 import type {
   Alert,
+  ChatAnswer,
   DashboardResponse,
   ProtocolOverview,
   ProtocolResearch,
@@ -32,6 +33,30 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
  * inlines `NEXT_PUBLIC_API_PUBLIC_URL` at build time.
  */
 export const API_PUBLIC_URL = resolveApiPublicUrl(
+  process.env.NEXT_PUBLIC_API_PUBLIC_URL,
+  process.env.NEXT_PUBLIC_API_URL,
+);
+
+/**
+ * Resolve the browser-reachable WebSocket base for streamed chat tokens.
+ * Prefers an explicit `NEXT_PUBLIC_API_WS_URL`; otherwise derives ws:/wss: from
+ * the public (then server) HTTP URL. The browser must reach the API directly
+ * here - the compose-internal `api:8000` host is not resolvable client-side,
+ * so in Docker this is set to `ws://localhost:3646`.
+ */
+export function resolveApiWsUrl(
+  wsUrl: string | undefined,
+  publicUrl: string | undefined,
+  serverUrl: string | undefined,
+  fallback = "ws://localhost:8000",
+): string {
+  if (wsUrl) return wsUrl.replace(/\/+$/, "");
+  const base = publicUrl ?? serverUrl ?? fallback;
+  return base.replace(/^http/, "ws").replace(/\/+$/, "");
+}
+
+export const API_WS_URL = resolveApiWsUrl(
+  process.env.NEXT_PUBLIC_API_WS_URL,
   process.env.NEXT_PUBLIC_API_PUBLIC_URL,
   process.env.NEXT_PUBLIC_API_URL,
 );
@@ -75,6 +100,25 @@ async function post<T>(path: string, timeoutMs = DEFAULT_TIMEOUT_MS): Promise<T>
   return res.json() as Promise<T>;
 }
 
+/** Server-side POST with a JSON body (used by the same-origin /api/chat proxy). */
+async function postJson<T>(
+  path: string,
+  body: unknown,
+  timeoutMs = DEFAULT_TIMEOUT_MS,
+): Promise<T> {
+  const res = await fetch(`${API_URL}${path}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+    cache: "no-store",
+    signal: AbortSignal.timeout(timeoutMs),
+  });
+  if (!res.ok) {
+    throw new Error(`API ${path} failed: ${res.status} ${await res.text()}`);
+  }
+  return res.json() as Promise<T>;
+}
+
 // A manual monitoring pass crawls the watchlist live; give it a generous budget.
 const RUN_TIMEOUT_MS = 120_000;
 
@@ -95,6 +139,11 @@ export const api = {
   alertHistory: () => get<Alert[]>("/api/alerts/history"),
   // Trigger a full monitoring pass server-side (invoked via the route handler).
   runAlerts: () => post<Alert[]>("/api/alerts/run", RUN_TIMEOUT_MS),
+  // Grounded chat, called by the same-origin /api/chat route handler so the
+  // compose-internal API_URL stays server-only. Non-streaming fallback for the
+  // WS path; give it the brief-length budget (a model answer can take ~90s).
+  chat: (question: string, protocol_slug?: string | null) =>
+    postJson<ChatAnswer>("/api/chat", { question, protocol_slug: protocol_slug ?? null }, BRIEF_TIMEOUT_MS),
 };
 
 /**

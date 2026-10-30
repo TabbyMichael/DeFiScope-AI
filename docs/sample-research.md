@@ -96,6 +96,18 @@ centralization and institutional trust assumptions — invisible to TVL data.
 
 ---
 
+> **Note — this is a point-in-time snapshot (2026-10-27).** It was written by hand
+> before the platform wired in DefiLlama fees / revenue / DEX volume and the
+> stablecoin peg watch. In the **current build** the "recommended next pull" in
+> §3 and §5 is largely automated: `fees/TVL` and `volume/TVL` now appear on every
+> board row and feed the **real-yield dependence** indicator, and a **peg-integrity**
+> indicator + `depeg` alert run for issuers in the curated stablecoin map. The
+> incentive-dependence gap shown here still reflects DefiLlama returning no staking
+> series for these slugs *at that time* — an absent feed is a data gap, not zero.
+> Re-run `GET /api/protocols/{slug}` for live figures.
+
+---
+
 ### Reproducibility
 
 ```bash

@@ -33,6 +33,10 @@ import type { ProtocolOverview } from "@/lib/types";
 
 type SortKey = "name" | "tvl" | "change_7d" | "change_30d" | "risk_score";
 const ALL = "all";
+// Mirror of the bands offered by the risk-band Select below. Also used to
+// validate a `?band=` deep link coming from the overview's risk-band card, so a
+// stray/unknown value falls back to "all" instead of silently filtering to empty.
+const BANDS = ["low", "moderate", "elevated", "high", "unknown"];
 
 function ChangeCell({ value }: { value: number | null }) {
   if (value == null) return <span className="text-muted-foreground">—</span>;
@@ -85,13 +89,21 @@ function SortHead({
 
 export default function ProtocolTable({
   protocols,
+  initialBand,
 }: {
   protocols: ProtocolOverview[];
+  initialBand?: string;
 }) {
   const [sortKey, setSortKey] = useState<SortKey>("tvl");
   const [dir, setDir] = useState<"asc" | "desc">("desc");
-  const [band, setBand] = useState<string>(ALL);
+  const [band, setBand] = useState<string>(
+    initialBand && BANDS.includes(initialBand) ? initialBand : ALL,
+  );
   const [category, setCategory] = useState<string>(ALL);
+
+  // NOTE: `initialBand` (a `?band=` deep link from the overview's risk-band
+  // card) is read only at mount. The page re-mounts this table via a `key` when
+  // the incoming band changes, so we never sync state inside an effect.
 
   const categories = useMemo(
     () =>
@@ -147,7 +159,7 @@ export default function ProtocolTable({
             </SelectTrigger>
             <SelectContent>
               <SelectItem value={ALL}>All risk bands</SelectItem>
-              {["low", "moderate", "elevated", "high", "unknown"].map((b) => (
+              {BANDS.map((b) => (
                 <SelectItem key={b} value={b}>{b}</SelectItem>
               ))}
             </SelectContent>

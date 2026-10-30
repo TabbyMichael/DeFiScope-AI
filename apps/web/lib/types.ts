@@ -35,4 +35,6 @@ export type ResearchBrief = DeepRequired<Schemas["ResearchBrief"]>;
 export type Mover = DeepRequired<Schemas["Mover"]>;
 export type DashboardStats = DeepRequired<Schemas["DashboardStats"]>;
 export type DashboardResponse = DeepRequired<Schemas["DashboardResponse"]>;
+export type ChatCitation = DeepRequired<Schemas["ChatCitation"]>;
+export type ChatAnswer = DeepRequired<Schemas["ChatAnswer"]>;
 

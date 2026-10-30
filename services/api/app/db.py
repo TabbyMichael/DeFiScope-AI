@@ -34,6 +34,25 @@ from app.config import get_settings
 logger = logging.getLogger(__name__)
 
 
+_IS_POSTGRES = get_settings().database_url.startswith("postgresql")
+
+
+def _chunk_vector_type():
+    """Dialect-aware embedding column for ``ChatChunk``.
+
+    On Postgres we use pgvector's native ``Vector(dim)`` type (the compose db
+    image enables the extension) so future ANN indexing is available. On SQLite
+    (dev / tests, where pgvector does not exist) we store the vector as JSON and
+    rank it in-process - the same code path runs either way, only the column
+    type differs. The import is guarded so a SQLite install never needs the
+    package."""
+    if _IS_POSTGRES:  # pragma: no cover - exercised only against Postgres
+        from pgvector.sqlalchemy import Vector
+
+        return Vector(get_settings().embedding_dimensions)
+    return JSON
+
+
 class Base(DeclarativeBase):
     pass
 
@@ -87,6 +106,27 @@ class AlertRecord(Base):
     notified_at = Column(DateTime(timezone=True))
 
 
+class ChatChunk(Base):
+    """One indexed passage for the ask-the-analyst RAG chat (roadmap #8).
+
+    The chunk text and its provenance are the source of truth for a citation;
+    ``embedding`` is optional (null when indexed offline). ``chunk_id`` is a
+    content hash so re-ingesting unchanged text updates the same row instead of
+    duplicating it. ``doc_id`` lets us drop every chunk from one source when it
+    changes (a rewritten doc section, a protocol pack refreshed)."""
+
+    __tablename__ = "chat_chunks"
+
+    chunk_id = Column(String, primary_key=True)
+    doc_id = Column(String, index=True, nullable=False)
+    source_type = Column(String)  # "doc" | "evidence"
+    source_name = Column(String)
+    section = Column(String)
+    protocol_slug = Column(String, index=True)
+    text = Column(String, nullable=False)
+    embedding = Column(_chunk_vector_type())
+
+
 _settings = get_settings()
 _connect_args = {"check_same_thread": False} if _settings.database_url.startswith("sqlite") else {}
 engine = create_engine(_settings.database_url, connect_args=_connect_args)
@@ -94,6 +134,20 @@ SessionLocal = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False
 
 
 def init_db() -> None:
+    # pgvector's ``Vector`` column type requires the extension to exist before
+    # ``create_all`` builds chat_chunks. Ensure it on Postgres (the compose db
+    # image ships the extension binary); best-effort so a non-superuser or a
+    # non-pgvector deployment degrades to chat running lexical-only rather than
+    # crashing startup. SQLite (dev/tests) has no such concept and skips this.
+    if _IS_POSTGRES:  # pragma: no cover - exercised only against Postgres
+        try:
+            with engine.begin() as conn:
+                conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+        except Exception as exc:  # noqa: BLE001 - surface, don't block startup
+            logger.warning(
+                "Could not enable pgvector extension (%s); chat will use lexical retrieval",
+                type(exc).__name__,
+            )
     Base.metadata.create_all(engine)
     _migrate_missing_columns()
 

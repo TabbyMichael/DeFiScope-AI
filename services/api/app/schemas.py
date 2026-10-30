@@ -153,3 +153,32 @@ class DashboardResponse(BaseModel):
     alerts: list[Alert] = Field(default_factory=list)
     aggregate_history: list[TvlPoint] = Field(default_factory=list)
     as_of: str | None = None
+
+
+class ChatRequest(BaseModel):
+    question: str = Field(..., min_length=1, max_length=2000)
+    # When set, retrieval is scoped to that protocol's own evidence first
+    # (falling back to shared methodology docs). Omit for a general question.
+    protocol_slug: str | None = None
+
+
+class ChatCitation(BaseModel):
+    """A numbered source an answer is grounded in. ``n`` matches the [n] marker
+    inline in the answer text; ``quote`` is the exact passage retrieved."""
+
+    n: int
+    source: str  # human source name (Methodology, protocol name, ...)
+    location: str  # section heading within the source
+    quote: str  # the cited passage (possibly truncated)
+
+
+class ChatAnswer(BaseModel):
+    answer: str
+    citations: list[ChatCitation] = Field(default_factory=list)
+    # True when the answer is backed by retrieved, cited context; False when it
+    # had to report that the evidence base cannot establish an answer.
+    grounded: bool
+    # "llm" (model-composed), "extractive" (offline quoted passages), or
+    # "none" (no supporting context found - a refusal, not a fabricated answer).
+    generated_by: str
+    model: str | None = None

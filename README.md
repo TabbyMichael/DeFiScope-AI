@@ -17,10 +17,12 @@ required). Try it on [Aave](http://localhost:3000/protocols/aave-v3) vs
 
 | | |
 |---|---|
-| **Research dashboard** | Compare TVL, 7d/30d changes, volatility, chain concentration and risk bands across protocols — real data, live |
-| **Explainable risk scoring** | Five weighted indicators; every score ships with its evidence *and* its limitations. Missing data becomes a visible `data gap`, never a fake "safe" |
-| **AI research briefs** | Structured executive summary, growth drivers, risks, confidence, and next steps — LLM-generated when a key is configured, deterministic template otherwise (same sections, fully offline) |
-| **Automated monitoring** | Scheduled rules flag TVL crashes, suspicious surges, incentive-heavy structures, and stale upstream data — each alert embeds the metric/threshold that fired it |
+| **Research dashboard** | Compare TVL, 7d/30d changes, volatility, fees & DEX volume, chain concentration and risk bands across the whole market — curated protocols **plus the top 50 by TVL auto-discovered** from the DefiLlama directory (CEX/bridge/chain totals excluded). Rendered DB-first from daily snapshots |
+| **Explainable risk scoring** | Seven weighted indicators (chain concentration, TVL volatility & trend, incentive & real-yield dependence, security posture, stablecoin peg integrity); every score ships with its evidence *and* its limitations. Missing data becomes a visible `data gap` and renormalizes out of the composite — never a fake "safe" |
+| **AI research briefs + downloads** | Structured executive summary, growth drivers, risks, confidence and next steps — LLM-generated when a key is configured, deterministic template otherwise (same sections, fully offline). Exportable as **Markdown, CSV or print-ready PDF** (`GET /api/briefs/{slug}/export`) |
+| **Ask the analyst (RAG chat)** | Grounded Q&A over our own methodology docs + each protocol's evidence (indicators, limitations, data gaps, alerts) — every answer cites numbered sources and states what it *cannot* establish. Works offline (BM25 retrieval + extractive answers) with a method-aware relevance gate that refuses off-topic questions, or streams tokens over WebSocket with OpenAI / a free local Ollama model |
+| **Side-by-side comparison** | Pick 2–3 protocols into a shareable `/compare` matrix (URL-encoded selection) to tell the "Aave vs Uniswap vs Lido" story |
+| **Automated monitoring + delivery** | Scheduled rules flag TVL crashes, one-day shocks, suspicious surges, incentive-heavy structures, stablecoin depegs and stale upstream data — each alert embeds the metric/threshold that fired it, persists idempotently per protocol/rule/day, and fans out to **console / webhook / Slack / Discord / Telegram / email** (every channel activates only when its env secret is set) |
 
 ## Quick start
 
@@ -125,6 +127,74 @@ Notes:
   so share the separate API tunnel URL printed by the script for anyone who needs
   the raw OpenAPI docs.
 
+## Ask the analyst — local LLM via Ollama (free, offline)
+
+The `/ask` chat retrieves grounding evidence from our own `docs/` and each
+protocol's indicators / data-gaps / alerts, then answers **citing numbered
+sources and stating what it cannot establish**. With no model configured it runs
+fully offline: retrieval falls back to a pure-Python BM25 index and answers are
+composed *extractively* from quoted passages. To get fluent natural-language
+answers without a cloud key or cost, point the same OpenAI-compatible endpoint at a
+free local [Ollama](https://ollama.com) model.
+
+> Always use Ollama's **`/v1` OpenAI-compatible shim**, not its native `/api/chat`
+> — the app parses OpenAI-style SSE (`data:` … `[DONE]`), which only `/v1` emits.
+
+### Option A — Ollama on your host
+
+```bash
+# one-time: install Ollama and pull a chat model
+curl -fsSL https://ollama.com/install.sh | sh
+ollama pull qwen2.5:7b-instruct     # richer prose; llama3.2 / qwen2.5:3b run on less RAM
+
+# then in services/api/.env:
+DEFISCOPE_OPENAI_BASE_URL=http://localhost:11434/v1
+DEFISCOPE_OPENAI_API_KEY=ollama          # any non-empty value; the LLM path
+                                          # enables only when a key is SET -
+                                          # Ollama ignores the token itself
+DEFISCOPE_OPENAI_MODEL=qwen2.5:7b-instruct
+```
+
+Restart the API (`make api-dev`), then open http://localhost:3000/ask.
+
+### Option B — Ollama in Docker (opt-in profile)
+
+The [`ollama`](docker-compose.yml) service (plus an optional `open-webui`
+developer console) lives behind an opt-in profile, so the default stack stays
+lean and never hard-depends on a multi-GB model:
+
+```bash
+docker compose --profile llm up -d
+docker compose exec ollama ollama pull qwen2.5:7b-instruct
+
+# and in services/api/.env, use the internal service hostname:
+DEFISCOPE_OPENAI_BASE_URL=http://ollama:11434/v1
+DEFISCOPE_OPENAI_API_KEY=ollama
+DEFISCOPE_OPENAI_MODEL=qwen2.5:7b-instruct
+```
+
+### Tuning long, engaging answers (and a gotcha we verified)
+
+Retrieval stays lexical (BM25) — **no embeddings or DB setup required** for a
+local LLM. Local CPU models are slow, so if answers get truncated you may need to
+lift the generation budget and give the request enough time:
+
+```bash
+DEFISCOPE_RAG_MAX_TOKENS=1600           # longer answers (default)
+DEFISCOPE_RAG_LLM_TIMEOUT_SECONDS=150   # slow CPU models exceed short timeouts
+DEFISCOPE_RAG_TEMPERATURE=0.5           # a little more fluent, still grounded
+```
+
+When we tested this on CPU, a 7B model at the previous fixed 90s timeout timed
+out and the chat **auto-degraded to the offline extractive answer** — the safety
+net working as designed, and the reason the timeout is now configurable. If
+Ollama is ever down, the app keeps answering from cited evidence instead of
+erroring.
+
+The honesty contract is enforced by the system prompt, not by restraining the
+model: it must answer only from the numbered context, attribute every claim to
+`[n]`, never invent numbers, and say what the evidence cannot establish.
+
 ## Tests
 
 ```bash
@@ -167,10 +237,19 @@ Deep-dive docs: [methodology](docs/methodology.md) ·
 
 ## Roadmap
 
-1. Fee/revenue series join (DefiLlama `/summary/fees`) to decompose price-vs-usage.
-2. Stablecoin depeg watch: per-peg deviation alerts with contagion mapping.
-3. Dune-powered on-chain activity (daily users, real volume) for one flagship protocol.
-4. Client-ready PDF/CSV export with sources, assumptions, and as-of timestamps.
+Shipped since the MVP: fee/revenue/DEX-volume join (decomposes price vs usage),
+stablecoin depeg watch, PDF/CSV/Markdown export, risk-score history, alert
+delivery, side-by-side comparison, and the grounded RAG chat.
+
+Still open (see [docs/modernization-roadmap.md](docs/modernization-roadmap.md)):
+
+1. Auth + rate limiting on the mutating/admin routes (a must-fix before any
+   public deploy — `POST /api/alerts/run` is an unauthenticated crawl today).
+2. Dune-powered on-chain activity (daily users, real volume, liquidations) for a
+   flagship protocol; move beyond the TVL proxy.
+3. Cross-protocol correlation / stablecoin-contagion mapping.
+4. Adaptive anomaly detection (replacing static thresholds) and price-normalized
+   TVL once a reliable protocol→token map exists.
 
 *Built as a portfolio piece for DeFi research & strategy work — every design
 choice optimizes for "can I defend this number in an interview?"*

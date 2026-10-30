@@ -14,7 +14,9 @@ from sqlalchemy import text
 
 from app.config import get_settings
 from app.db import SessionLocal, engine, init_db
-from app.routers import alerts, briefs, dashboard, protocols
+from app.rag.ingest import load_index, reindex
+from app.rag.service import RagService
+from app.routers import alerts, briefs, chat, dashboard, protocols
 from app.services.protocols import ProtocolResearchService
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
@@ -41,6 +43,13 @@ async def lifespan(app: FastAPI):
     app.state.research_service = ProtocolResearchService()
     init_db()
 
+    # Chat RAG service. Hydrate synchronously from any persisted chunks so the
+    # endpoint can answer (offline/lexical) from the first request, then refresh
+    # docs + live evidence in the background once the warm-up pass has populated
+    # the snapshots/alerts the evidence chunks are built from.
+    app.state.rag_service = RagService()
+    _seed_chat_index(app.state.rag_service)
+
     scheduler = AsyncIOScheduler()
     scheduler.add_job(lambda: alerts_alert_run(app.state), "interval", minutes=30, id="monitor")
     scheduler.start()
@@ -52,10 +61,12 @@ async def lifespan(app: FastAPI):
     # port binding and fail readiness probes. Run it as a background task; the
     # dashboard's live-fallback covers the brief window before it completes.
     app.state.warmup_task = asyncio.create_task(_warmup(app.state))
+    app.state.ingest_task = asyncio.create_task(_ingest(app.state))
 
     yield
 
     app.state.warmup_task.cancel()
+    app.state.ingest_task.cancel()
     scheduler.shutdown(wait=False)
     await app.state.http.aclose()
 
@@ -68,6 +79,39 @@ async def _warmup(state) -> None:
         raise
     except Exception as exc:  # noqa: BLE001 - never let warm-up crash the app
         logger.warning("Startup warm-up pass failed (will retry on demand): %s", exc)
+
+
+def _seed_chat_index(rag_service: RagService) -> None:
+    """Best-effort cold-start hydration from persisted chunks (never blocks)."""
+    session = SessionLocal()
+    try:
+        n = load_index(session, rag_service)
+        if n:
+            logger.info("Chat index hydrated from %d persisted chunks", n)
+    except Exception as exc:  # noqa: BLE001 - empty index is a valid cold start
+        logger.warning("Chat index hydration skipped: %s", type(exc).__name__)
+    finally:
+        session.close()
+
+
+async def _ingest(state) -> None:
+    # Wait for the warm-up pass so tracked protocols + recent alerts exist in
+    # the DB - those rows are what the evidence chunks are derived from.
+    try:
+        await state.warmup_task
+    except asyncio.CancelledError:
+        raise
+    except Exception:  # noqa: BLE001 - warmup already logged; still try to index
+        pass
+    session = SessionLocal()
+    try:
+        await reindex(session, state.research_service, state.http, state.rag_service)
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:  # noqa: BLE001 - never let ingest crash the app
+        logger.warning("Chat ingest failed (chat degrades to docs/refusal): %s", exc)
+    finally:
+        session.close()
 
 
 app = FastAPI(
@@ -88,6 +132,7 @@ app.include_router(protocols.router)
 app.include_router(briefs.router)
 app.include_router(alerts.router)
 app.include_router(dashboard.router)
+app.include_router(chat.router)
 
 
 def _db_status() -> str:

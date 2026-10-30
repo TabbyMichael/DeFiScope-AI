@@ -3,7 +3,13 @@
 
 services:
   db:
-    image: postgres:16-alpine
+    # pgvector-enabled Postgres so the chat (roadmap #8) can store embeddings in
+    # a native `vector` column. Same wire protocol/driver as postgres:16.
+    # Built locally on postgres:16-alpine + source-compiled pgvector: Docker
+    # Scout reports 4C/31H vs the third-party pgvector/pgvector:pg16 (Debian
+    # base) at 9C/46H. See services/db/Dockerfile for the why/how.
+    build: ./services/db
+    image: defiscope-db:latest
     restart: unless-stopped
     environment:
       POSTGRES_USER: defiscope
@@ -25,6 +31,32 @@ services:
       DEFISCOPE_DEFAULT_PROTOCOLS: aave-v3,uniswap-v3,lido,curve-dex,compound-v3
       # Optional: wire a model API key through from your shell
       DEFISCOPE_OPENAI_API_KEY: ${DEFISCOPE_OPENAI_API_KEY:-}
+      # Point chat generation + embeddings at any OpenAI-compatible server.
+      # Defaults to OpenAI; run with `--profile llm` (Ollama) and set these in
+      # .env to go fully local. NOTE for Ollama/LocalAI: our code enables the
+      # LLM path only when a key is SET, so pass any non-empty value for
+      # DEFISCOPE_OPENAI_API_KEY (the local server ignores the token itself).
+      DEFISCOPE_OPENAI_BASE_URL: ${DEFISCOPE_OPENAI_BASE_URL:-https://api.openai.com/v1}
+      DEFISCOPE_OPENAI_MODEL: ${DEFISCOPE_OPENAI_MODEL:-gpt-4o-mini}
+      DEFISCOPE_OPENAI_EMBEDDING_MODEL: ${DEFISCOPE_OPENAI_EMBEDDING_MODEL:-text-embedding-3-small}
+      # Answer style: higher temp + a generous token budget = fuller, engaging
+      # prose (still forced by the system prompt to cite [n] and admit gaps).
+      DEFISCOPE_RAG_TEMPERATURE: ${DEFISCOPE_RAG_TEMPERATURE:-0.5}
+      DEFISCOPE_RAG_MAX_TOKENS: ${DEFISCOPE_RAG_MAX_TOKENS:-1600}
+      # Local CPU models are slow; keep the generation timeout generous so long
+      # answers aren't needlessly degraded to the extractive fallback.
+      DEFISCOPE_RAG_LLM_TIMEOUT_SECONDS: ${DEFISCOPE_RAG_LLM_TIMEOUT_SECONDS:-150}
+      # Relevance bar for the offline BM25 path: how many distinct informative
+      # query terms a passage must share to count as supporting (not just one
+      # stray common word). Raise to tighten, lower to be more permissive.
+      DEFISCOPE_RAG_MIN_QUERY_TERM_OVERLAP: ${DEFISCOPE_RAG_MIN_QUERY_TERM_OVERLAP:-2}
+      # Chat RAG: read the methodology/architecture docs (mounted read-only
+      # below) so grounded answers can cite them, not just live protocol data.
+      DEFISCOPE_RAG_DOCS_DIR: /app/docs
+    volumes:
+      # Ship the repo docs into the container for chat ingestion without
+      # rebuilding the image (read-only; the app never writes here).
+      - ./docs:/app/docs:ro
     ports:
       - "3646:8000"
     # Image defines a HEALTHCHECK on /api/health/ready; wait for it to pass.
@@ -48,15 +80,56 @@ services:
         # Browser-facing URL for the docs link. `api:8000` is unreachable from
         # the host browser, so point it at the API's published host port (3646).
         NEXT_PUBLIC_API_PUBLIC_URL: http://localhost:3646
+        # Browser-reachable WebSocket base for streamed chat tokens. The browser
+        # opens the socket directly (Next can't reliably proxy WS), so this must
+        # be the host-published address, not the internal `api:8000`.
+        NEXT_PUBLIC_API_WS_URL: ws://localhost:3646
     restart: unless-stopped
     environment:
       NEXT_PUBLIC_API_URL: http://api:8000
       NEXT_PUBLIC_API_PUBLIC_URL: http://localhost:3646
+      NEXT_PUBLIC_API_WS_URL: ws://localhost:3646
     ports:
       - "4000:3000"
     depends_on:
       api:
         condition: service_healthy
 
+  # --- Optional local LLM (start with: docker compose --profile llm up -d) ----
+  # Free, self-hosted chat generation for "Ask the analyst". NOTHING above
+  # depends on these: with no key/server the app already degrades to the offline
+  # BM25 + extractive path, so the shipped default stays lean. To enable:
+  #   1) docker compose --profile llm up -d
+  #   2) docker compose exec ollama ollama pull qwen2.5:7b-instruct
+  #   3) in .env:  DEFISCOPE_OPENAI_API_KEY=ollama
+  #               DEFISCOPE_OPENAI_BASE_URL=http://ollama:11434/v1
+  #               DEFISCOPE_OPENAI_MODEL=qwen2.5:7b-instruct
+  # (the API key value is ignored by Ollama but our code requires one to be set)
+  ollama:
+    image: ollama/ollama:latest
+    profiles: ["llm"]
+    restart: unless-stopped
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+
+  # Internal developer console ONLY (talks straight to Ollama for prompt/model
+  # tuning). It is NOT the customer-facing chat - our grounded dashboard stays.
+  open-webui:
+    image: ghcr.io/open-webui/open-webui:main
+    profiles: ["llm"]
+    restart: unless-stopped
+    ports:
+      - "3002:8080"
+    environment:
+      OLLAMA_BASE_URL: http://ollama:11434
+    volumes:
+      - open_webui_data:/app/backend/data
+    depends_on:
+      - ollama
+
 volumes:
   pgdata:
+  ollama_data:
+  open_webui_data:

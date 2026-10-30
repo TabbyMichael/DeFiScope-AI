@@ -111,6 +111,67 @@ automatically when data gaps exist.
 Alert IDs are deterministic per protocol/rule/day, so re-runs are idempotent.
 Every alert embeds its triggering evidence: metric, observed value, threshold.
 
+## Chat / RAG (`app/rag/`)
+
+"Ask the analyst" answers questions about a protocol or the scoring itself by
+retrieving evidence from DeFiScope's own corpus and grounding the answer in it.
+It adds no new claims — it only re-states what the dashboard already computed,
+with citations.
+
+**Retrieval sources.** Two kinds of chunks are indexed:
+
+- *Documentation*: `methodology.md`, `architecture.md`, `defi-mechanics-primer.md`,
+  `sample-research.md`, and the curated security notes — split on heading/paragraph
+  boundaries into chunks with provenance (`source_name`, `section`).
+- *Evidence packs*: for each tracked protocol, its overview numbers, each risk
+  indicator's `evidence` **and** `limitation`, its `data_gaps`, and recent alerts —
+  so a "why is Lido flagged?" question retrieves the exact limitation wording, not
+  just the headline.
+
+**Ranking.** When an `OPENAI_API_KEY` is configured, chunks are embedded
+(`text-embedding-3-small`) and ranked by cosine similarity (pgvector on Postgres,
+in-process cosine on SQLite/dev). With **no key** the system falls back to a pure
+Python Okapi-BM25 lexical score (k1=1.5, b=0.75) — same store, same top-k, no
+external calls. Chunks are content-hashed *with their provenance folded into the
+hash* (`doc_id ␟ section ␟ body`), so unchanged text keeps a stable id across
+re-indexes while the *same* boilerplate appearing under different sources gets a
+distinct id rather than colliding on the primary key.
+
+**Relevance gate (method-aware).** The two retrievers produce scores on
+incomparable scales — cosine is bounded `[0, 1]`, BM25 is unbounded (typically
+1–20+) — so a single fixed threshold cannot gate both. The gate keys off whichever
+path actually ranked the results:
+
+- **Vector path:** a chunk must reach the cosine floor `rag_min_score` (default 0.5).
+- **Lexical path:** a raw BM25 floor would be meaningless (one stray common word
+  like "like" clears it), so a passage must instead share at least
+  `rag_min_query_term_overlap` **distinct informative query terms** (default 2,
+  after stopword removal). The requirement is capped by the query's own
+  informative-term count, so a terse single-word question still answers on one
+  match, while an off-topic question sharing only filler is refused.
+
+Only chunks that clear the bar become *supporting* evidence; if none do, the chat
+refuses instead of quoting irrelevant passages.
+
+**Grounding rule (the honesty contract).** The model is instructed to *answer only
+from the numbered context, attribute every claim to `[n]`, state what the context
+cannot establish, and never invent numbers*. Every response exposes `citations`,
+`grounded`, and `generated_by`, so a model answer is never mistaken for verified
+fact. Three outcomes exist:
+
+| `generated_by` | When | Meaning for the reader |
+|---|---|---|
+| `llm` | key present and the call succeeds | Natural-language prose, each claim tied to a `[n]` citation |
+| `extractive` | no key, or the LLM call fails | Verbatim quoted passages from the evidence — no synthesis, nothing invented |
+| `none` (`grounded=false`) | no retrieved chunk clears the method-aware relevance gate (cosine floor, or the lexical informative-term bar) | A refusal: it names what it cannot establish and lists the missing evidence rather than guessing |
+
+**Limits.** Retrieval quality is bounded by the corpus: the chat can only explain
+what the pipeline already measured. It inherits every data source limitation above
+(TVL conflates price, missing adapters are gaps, the depeg map is narrow), does not
+access live markets or new protocols beyond what is indexed, and never overrides a
+`data_gap` with a confident-sounding sentence. It is a window onto the evidence, not
+an independent analyst.
+
 ## What this system deliberately does NOT claim
 
 - It does not detect wash trading or sybil activity (needs transaction-level data).

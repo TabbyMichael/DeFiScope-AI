@@ -76,6 +76,48 @@ class Settings(BaseSettings):
     openai_base_url: str = "https://api.openai.com/v1"
     openai_model: str = "gpt-4o-mini"
 
+    # --- Ask-the-analyst RAG chat (roadmap #8) --------------------------------
+    # Embeddings reuse the same OpenAI-compatible host/key as the brief LLM.
+    # When no key is configured the retrieval degrades to a pure-Python BM25
+    # lexical index and answers are composed extractively from quoted passages,
+    # so the feature ships and works offline (the app's core differentiator).
+    openai_embedding_model: str = "text-embedding-3-small"
+    embedding_dimensions: int = 1536
+    rag_enabled: bool = True
+    # Number of chunks retrieved and fed to the model as numbered context.
+    rag_top_k: int = 6
+    # Target chunk size in characters (markdown is split on heading/paragraph
+    # boundaries near this length; never mid-sentence at a hard cut).
+    rag_chunk_size: int = 800
+    # Relevance floor for the VECTOR (cosine) path, where scores live in [0, 1].
+    # A chunk below this is not treated as supporting evidence.
+    rag_min_score: float = 0.5
+    # Relevance bar for the LEXICAL (BM25) path, whose scores are unbounded, so a
+    # small absolute floor is meaningless (a single stray common word clears it).
+    # Instead a passage must share at least this many *distinct informative query
+    # terms* to count as supporting - tighten to reduce off-topic false matches,
+    # loosen if terse single-term queries get refused. Capped by the query's own
+    # informative-term count, so a one-word question still needs only one match.
+    rag_min_query_term_overlap: int = 2
+    # Generation style for the grounded LLM answer. Higher temperature + a
+    # generous token budget yield fuller, more engaging prose; the honesty
+    # guardrail (cite [n], state what cannot be established, never invent
+    # numbers) is enforced by the system prompt, not by restraint here.
+    rag_temperature: float = 0.5
+    # Upper bound on answer length. Must be explicit because self-hosted
+    # OpenAI-compatible servers (Ollama) otherwise truncate to a small default.
+    rag_max_tokens: int = 1600
+    # Per-request timeout for chat generation. Generous because a local CPU
+    # model producing a long answer can exceed the default HTTP timeout; too low
+    # a value makes the app needlessly degrade to the extractive fallback.
+    rag_llm_timeout_seconds: float = 150.0
+    # Browser-reachable WebSocket base for token streaming (WS /ws/chat). Empty
+    # falls back to the HTTP API public URL's host with the ws/wss scheme.
+    api_ws_url: str | None = None
+    # Directory holding the methodology/architecture markdown the chat cites.
+    # Empty auto-discovers the repo ``docs/`` (dev) or the image ``/app/docs``.
+    rag_docs_dir: str | None = None
+
     # Alert thresholds
     alert_tvl_drop_pct: float = -15.0
     alert_tvl_surge_pct: float = 30.0
