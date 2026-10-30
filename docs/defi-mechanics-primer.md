@@ -17,8 +17,12 @@ selling of the outperforming asset leaves the LP worse off than holding — only
 accrues to a small set of professional managers, and headline TVL badly
 overstates *usable* depth at any price.
 
-**How DeFiScope sees it:** pool TVL and its trend. **What it can't see:** swap
-volume, fee/IL outcomes, MEV drag, or how concentrated positions actually are.
+**How DeFiScope sees it:** pool TVL and its trend, plus the trailing **DEX swap
+volume** (`/overview/dexs`) and **fees** (`fees.llama.fi`) as capital-efficiency
+ratios (volume/TVL, fees/TVL) — so a pool whose TVL is backed by real turnover and
+fee revenue reads differently from one that is not. **What it can't see:** per-LP
+impermanent-loss outcomes, MEV drag, or how concentrated v3 positions actually are
+(headline TVL still overstates *usable* depth at any price).
 
 ## 2. Collateralized Lending — Aave, Compound
 
@@ -32,9 +36,11 @@ oracle manipulation to fake collateral value, and bad-debt if liquidations can't
 fill in time. Aave v3 adds e-mode (higher LTV within correlated buckets) — more
 capital efficiency, tighter liquidation margins.
 
-**How DeFiScope sees it:** TVL = supplied value. **What it can't see:**
+**How DeFiScope sees it:** TVL = supplied value, and trailing fee/revenue as a
+real-yield signal. **What it can't see:
 borrow utilization, liquidation health factors, or which collateral is risky —
-DefiLlama's `borrowed` series is wired into the client as the next signal.
+DefiLlama's `borrowed` series is fetched into the client but not yet scored (the
+next signal).
 
 ## 3. Staking & Liquid Staking — Lido, Rocket Pool
 
@@ -58,12 +64,18 @@ lending collateral, LP halves, and settlement is stablecoin-denominated.
 **Depeg channels:** collateral contagion (a depeg forces liquidations, which
 crash collateral, which depegs more), reserve loss of confidence, and
 bridge/mint-centralization failures. A large stable depeg is a *domino event*:
-its effects propagate through every protocol holding it — a key systemic-research
-angle beyond this MVP's scope (see "future work" in README).
+its effects propagate through every protocol holding it — cross-protocol contagion
+mapping is future work (see roadmap #10), beyond the current build.
 
-**How DeFiScope sees it:** indirectly — protocols with heavy stablecoin exposure
-show TVL shocks when depegs hit. **What it can't see:** the depeg itself
-(needs per-token price series; the natural next dataset).
+**How DeFiScope sees it:** now **directly** — for each USD-pegged coin a protocol
+*mints* (per the curated `protocol_stablecoins.json` map) it pulls daily price
+history from `coins.llama.fi` and computes peg deviation in basis points, feeding
+the **stablecoin peg-integrity indicator** (the highest-weighted one) and a
+`depeg` alert (≥ 50 bps, critical ≥ 100 bps). **What it can't see:** a coin
+*outside* the curated map (reported as "not assessed", never as peg-safe), a
+coin's collateral/redemption mechanics, or whether an excursion that has since
+recovered was structural — a non-zero reading is a prompt to verify, not proof of
+an ongoing depeg.
 
 ## 5. Incentives, emissions, and mercenary capital
 
@@ -75,8 +87,10 @@ better yields appear ("mercenary capital").
 emissions campaign *looks like adoption*. Distinguishing them requires emissions
 schedules, fee/TVL ratios (real yield), and unstake behavior — none of which
 headline TVL provides. DeFiScope therefore scores incentive dependence when
-staking data exists, marks it a **data gap** when it doesn't, and its
-`tvl_surge` alert treats suspiciously fast growth as *unverified until proven*.
+staking data exists, scores **real-yield dependence** (trailing fees/TVL) when the
+fees adapter reports a series, marks both as a **data gap** when the data is
+absent, and its `tvl_surge` alert treats suspiciously fast growth as *unverified
+until proven*.
 
 ## 6. Risks that TVL cannot see (know these cold)
 

@@ -17,7 +17,15 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { api } from "@/lib/api";
 import type { DashboardResponse } from "@/lib/types";
 
-async function DashboardContent() {
+async function DashboardContent({
+  searchParams,
+}: {
+  searchParams: Promise<{ band?: string }>;
+}) {
+  // Read the (optional) band deep-link INSIDE the Suspense boundary: Next 16
+  // Cache Components treats `searchParams` as runtime data, so accessing it in
+  // the page shell (outside <Suspense>) would block prerendering.
+  const { band: initialBand } = await searchParams;
   let data: DashboardResponse | null = null;
   let error: string | null = null;
   try {
@@ -64,7 +72,13 @@ async function DashboardContent() {
 
       <div className="grid gap-6 lg:grid-cols-3">
         <div className="lg:col-span-2">
-          <ProtocolTable protocols={data.protocols} />
+          <div id="protocols" className="scroll-mt-4">
+            <ProtocolTable
+              key={initialBand ?? "all"}
+              protocols={data.protocols}
+              initialBand={initialBand}
+            />
+          </div>
         </div>
         <div className="space-y-6">
           <RiskWatchlist protocols={data.protocols} />
@@ -110,10 +124,14 @@ function DashboardFallback() {
   );
 }
 
-export default function DashboardPage() {
+export default function DashboardPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ band?: string }>;
+}) {
   return (
     <Suspense fallback={<DashboardFallback />}>
-      <DashboardContent />
+      <DashboardContent searchParams={searchParams} />
     </Suspense>
   );
 }

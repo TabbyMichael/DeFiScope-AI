@@ -1,13 +1,16 @@
 # DeFiScope AI - web image (multi-stage Next.js standalone, non-root, healthchecked).
 
 # --- Deps stage: install exact dependencies (cached on package.json changes) --
-FROM node:22-slim AS deps
+# Alpine (musl) base: Docker Scout reports 0C/10H vs node:22-slim's 0C/18H/39L.
+# Next.js ships musl builds of its SWC native compiler (@next/swc-linux-x64-musl),
+# which npm selects automatically, so the standalone build works unchanged.
+FROM node:22-alpine AS deps
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --no-audit --no-fund
 
 # --- Build stage: compile the standalone server -------------------------------
-FROM node:22-slim AS builder
+FROM node:22-alpine AS builder
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . ./
@@ -22,11 +25,16 @@ ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
 # when unset (local dev).
 ARG NEXT_PUBLIC_API_PUBLIC_URL=http://localhost:3646
 ENV NEXT_PUBLIC_API_PUBLIC_URL=$NEXT_PUBLIC_API_PUBLIC_URL
+# Browser-reachable WebSocket base for streamed chat tokens (roadmap #8). Also
+# build-time only (inlined into the client bundle). Defaults to the host-published
+# API port so the browser opens the chat socket directly against the api service.
+ARG NEXT_PUBLIC_API_WS_URL=ws://localhost:3646
+ENV NEXT_PUBLIC_API_WS_URL=$NEXT_PUBLIC_API_WS_URL
 ENV NEXT_TELEMETRY_DISABLED=1
 RUN npm run build
 
 # --- Runtime stage: minimal, non-root, standalone server only -----------------
-FROM node:22-slim AS runtime
+FROM node:22-alpine AS runtime
 WORKDIR /app
 ENV NODE_ENV=production \
     NEXT_TELEMETRY_DISABLED=1 \
