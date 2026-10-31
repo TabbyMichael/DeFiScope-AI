@@ -29,6 +29,17 @@ services:
     environment:
       DEFISCOPE_DATABASE_URL: postgresql+psycopg://defiscope:defiscope@db:5432/defiscope
       DEFISCOPE_DEFAULT_PROTOCOLS: aave-v3,uniswap-v3,lido,curve-dex,compound-v3
+      # Second data provider (on-chain activity). Both default to empty, which is
+      # a supported state: the API then reports `unconfigured` for every protocol
+      # and spends no Dune credits. Set them in .env to switch it on.
+      DEFISCOPE_DUNE_API_KEY: ${DEFISCOPE_DUNE_API_KEY:-}
+      DEFISCOPE_DUNE_ACTIVITY_QUERY_ID: ${DEFISCOPE_DUNE_ACTIVITY_QUERY_ID:-}
+      # Authorization mode: off | demo | required. Compose pins `demo` so the
+      # seeded accounts exist and the role switcher works — the default for a
+      # bare `docker run` is `required`, which seeds nothing and would look
+      # broken here.
+      DEFISCOPE_AUTH_MODE: ${DEFISCOPE_AUTH_MODE:-demo}
+      DEFISCOPE_AUTH_DEMO_PASSWORD: ${DEFISCOPE_AUTH_DEMO_PASSWORD:-defiscope-demo}
       # Optional: wire a model API key through from your shell
       DEFISCOPE_OPENAI_API_KEY: ${DEFISCOPE_OPENAI_API_KEY:-}
       # Point chat generation + embeddings at any OpenAI-compatible server.
@@ -84,11 +95,21 @@ services:
         # opens the socket directly (Next can't reliably proxy WS), so this must
         # be the host-published address, not the internal `api:8000`.
         NEXT_PUBLIC_API_WS_URL: ws://localhost:3646
+        # Baked: the login page's one-click demo buttons. Off in a real build.
+        NEXT_PUBLIC_AUTH_DEMO: "1"
     restart: unless-stopped
     environment:
       NEXT_PUBLIC_API_URL: http://api:8000
       NEXT_PUBLIC_API_PUBLIC_URL: http://localhost:3646
       NEXT_PUBLIC_API_WS_URL: ws://localhost:3646
+      # Read at request time by proxy.ts (the UX redirect) and lib/auth.ts.
+      # Keep it in step with the API's DEFISCOPE_AUTH_MODE; if they disagree the
+      # redirect and the enforcement just disagree, harmlessly — the API always
+      # has the final word. NEXT_PUBLIC_AUTH_DEMO is baked at build, hence the
+      # matching build arg above.
+      DEFISCOPE_AUTH_MODE: ${DEFISCOPE_AUTH_MODE:-demo}
+      NEXT_PUBLIC_AUTH_DEMO: "1"
+      NEXT_PUBLIC_AUTH_DEMO_PASSWORD: ${DEFISCOPE_AUTH_DEMO_PASSWORD:-defiscope-demo}
     ports:
       - "4000:3000"
     depends_on:

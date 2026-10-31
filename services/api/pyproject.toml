@@ -64,4 +64,7 @@ extend-immutable-calls = [
     "fastapi.Query",
     "fastapi.Body",
     "fastapi.Header",
+    # The permission dependency factory is called in argument defaults exactly
+    # like Depends itself; it returns a dependency, not a value.
+    "app.security.deps.require",
 ]

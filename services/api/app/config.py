@@ -2,6 +2,7 @@
 
 from functools import lru_cache
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -26,12 +27,60 @@ class Settings(BaseSettings):
     depeg_window_days: int = 30
     http_timeout_seconds: float = 30.0
 
+    # --- On-chain activity (second data provider: Dune Analytics) ------------
+    # Deliberately additive: DefiLlama stays the source of TVL, fees, revenue,
+    # prices and history. Dune supplies contract-level activity (active wallets,
+    # transaction count, transfer volume, returning wallets) that no TVL feed
+    # can express. Nothing here feeds the seven risk indicators - see
+    # docs/methodology.md for why that stays a separate, calibrated decision.
+    dune_base_url: str = "https://api.dune.com/api/v1"
+    # Backend-only secret. NEVER publish it through a NEXT_PUBLIC_* variable.
+    dune_api_key: str | None = None
+    # Id of the single saved Dune query returning all four activity metrics.
+    dune_activity_query_id: int | None = None
+    # Master switch for the whole feature. Even when enabled, nothing runs
+    # unless the key AND the query id are both present - the same "only build
+    # it when its inputs exist" rule the notification channels follow. With
+    # either missing, on-chain data reports an explicit data gap, never zeros.
+    onchain_data_enabled: bool = True
+    dune_max_retries: int = 3
+    # Wall-clock ceiling for one execution (execute -> poll -> results). On
+    # expiry the slug is skipped and retried next pass: a slow query must never
+    # hold a 30-minute monitoring pass hostage.
+    dune_poll_timeout_seconds: float = 120.0
+    dune_poll_interval_seconds: float = 3.0
+    # Dune's own server-side result cache. One execution per (slug, chain) per
+    # day is the steady state; a shorter window would spend credits re-running
+    # SQL whose answer cannot have changed.
+    dune_result_max_age_seconds: int = 86400
+    # Window (days) the saved query aggregates over.
+    dune_lookback_days: int = 30
+    # Credit and latency budget: at most this many protocols are refreshed per
+    # monitoring pass, round-robin, so a large watchlist drains over several
+    # passes instead of stalling one of them.
+    dune_max_protocols_per_pass: int = 8
+
     # HTTP resilience: extra attempts (beyond the first) for transient
     # 429/5xx/transport errors when talking to DefiLlama. 0 disables retries.
     defillama_max_retries: int = 3
 
     # Persistence
     database_url: str = "sqlite:///./defiscope.db"
+
+    # --- Authentication & authorization (roadmap #17) ------------------------
+    # off      -> every request is served a synthetic, unrestricted principal.
+    #             The legacy showcase/CI posture; NEVER safe for a public deploy.
+    # demo     -> local login required, seeded demo accounts, role switching.
+    # required -> local login required, no seeds, no role switching.
+    auth_mode: str = "demo"
+    auth_session_hours: int = 12
+    auth_cookie_name: str = "defiscope_session"
+    # Lifetime of the single-use WebSocket ticket the browser fetches before
+    # opening WS /ws/chat (the socket cannot carry an httpOnly cookie across
+    # hosts, so the session is exchanged for a short-lived ticket instead).
+    auth_ws_ticket_seconds: int = 60
+    # Published on the login page; only seeded when auth_mode == "demo".
+    auth_demo_password: str = "defiscope-demo"
 
     # Browser origins allowed to call the API. Server-side RSC fetches bypass
     # CORS, but the docs link and any client-side calls need the caller origin
@@ -161,6 +210,26 @@ class Settings(BaseSettings):
     smtp_starttls: bool = True
     smtp_from: str | None = None
     smtp_to: str | None = None
+
+    @field_validator("dune_activity_query_id", mode="before")
+    @classmethod
+    def _blank_query_id_is_unset(cls, value: object) -> object:
+        """Treat ``DEFISCOPE_DUNE_ACTIVITY_QUERY_ID=`` as "unset".
+
+        An empty assignment is the idiomatic way to leave an optional key in a
+        .env file; without this it would crash startup on int parsing rather
+        than degrading to the documented "no on-chain data" state."""
+        if value is None or (isinstance(value, str) and not value.strip()):
+            return None
+        return value
+
+    @property
+    def onchain_ready(self) -> bool:
+        """True only when on-chain data can actually be fetched.
+
+        Every caller checks this instead of the individual fields, so "enabled
+        but unconfigured" always resolves to the same, explicit data gap."""
+        return bool(self.onchain_data_enabled and self.dune_api_key and self.dune_activity_query_id)
 
     @property
     def protocol_slugs(self) -> list[str]:

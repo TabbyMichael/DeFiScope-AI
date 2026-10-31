@@ -29,6 +29,9 @@ export type ChainShare = DeepRequired<Schemas["ChainShare"]>;
 export type RiskIndicator = DeepRequired<Schemas["RiskIndicatorOut"]>;
 export type RiskAssessment = DeepRequired<Schemas["RiskAssessmentOut"]>;
 export type ProtocolResearch = DeepRequired<Schemas["ProtocolResearch"]>;
+// Second provider (Dune). `status` stays a closed union of literals from the
+// Pydantic Literal, so the UI can branch exhaustively on it.
+export type OnchainActivity = DeepRequired<Schemas["OnchainActivityOut"]>;
 export type Alert = DeepRequired<Schemas["Alert"]>;
 export type BriefSections = DeepRequired<Schemas["BriefSection"]>;
 export type ResearchBrief = DeepRequired<Schemas["ResearchBrief"]>;
@@ -37,4 +40,9 @@ export type DashboardStats = DeepRequired<Schemas["DashboardStats"]>;
 export type DashboardResponse = DeepRequired<Schemas["DashboardResponse"]>;
 export type ChatCitation = DeepRequired<Schemas["ChatCitation"]>;
 export type ChatAnswer = DeepRequired<Schemas["ChatAnswer"]>;
+
+// Auth surface (Task 1-3 of the RBAC/ABAC work).
+export type SubjectOut = DeepRequired<Schemas["SubjectOut"]>;
+export type LoginResponse = DeepRequired<Schemas["LoginResponse"]>;
+export type TicketResponse = DeepRequired<Schemas["TicketResponse"]>;
 

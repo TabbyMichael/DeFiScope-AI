@@ -19,7 +19,7 @@ export default function IndicatorCard({ indicator }: { indicator: RiskIndicator 
             {score == null ? "n/a" : score.toFixed(0)}
           </span>
           <span className="block text-[10px] text-muted-foreground">
-            risk 0–100 · w={weight}
+            risk 0 to 100 · w={weight}
           </span>
         </div>
       </div>

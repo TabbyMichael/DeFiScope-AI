@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { Suspense } from "react";
 import { notFound } from "next/navigation";
+import { LockKeyhole } from "lucide-react";
 
 import IndicatorCard from "@/components/IndicatorCard";
 import RiskBadge from "@/components/RiskBadge";
@@ -15,11 +16,14 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { api, fmtPct, fmtUsd } from "@/lib/api";
-import type { ProtocolResearch, ResearchBrief, RiskPoint } from "@/lib/types";
+import { ApiError, api } from "@/lib/api";
+import { fmtPct, fmtUsd } from "@/lib/api-config";
+import { getSession, hasPermission, type Session } from "@/lib/auth";
+import type { OnchainActivity, ProtocolResearch, ResearchBrief, RiskPoint } from "@/lib/types";
 
 async function ProtocolContent({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
+  const session = await getSession();
   let data: ProtocolResearch;
   let brief: ResearchBrief | null = null;
   let riskHistory: RiskPoint[] = [];
@@ -36,11 +40,18 @@ async function ProtocolContent({ params }: { params: Promise<{ slug: string }> }
       riskHistory = []; // trend is best-effort; no snapshots yet is not an error
     }
   } catch (e) {
+    // An out-of-scope protocol is an authorization verdict, not a missing page.
+    // Answering 404 would imply the protocol does not exist — the opposite of
+    // what the policy actually decided.
+    if (e instanceof ApiError && e.isDenial) {
+      return <DenialPanel denial={e} />;
+    }
     console.error("protocol page error", e);
     notFound();
   }
 
   const o = data.overview;
+  const exportBlocked = briefExportGate(session, brief);
   return (
     <div className="mx-auto max-w-5xl space-y-6">
       <nav className="text-xs text-muted-foreground">
@@ -105,11 +116,37 @@ async function ProtocolContent({ params }: { params: Promise<{ slug: string }> }
             <Metric label="Volume / TVL (30d)" value={fmtRatio(o.volume_tvl)} />
           </div>
           <p className="mt-3 text-xs leading-relaxed text-muted-foreground">
-            “—” means DefiLlama has no tracked series for this protocol — a data
-            gap, not zero. A low fee/volume-to-TVL ratio can also reflect
+            “n/a” means DefiLlama has no tracked series for this protocol. That is
+            a data gap, not zero. A low fee/volume-to-TVL ratio can also reflect
             capital-efficient stores of value (liquid staking, stablecoins) rather
             than weak real yield.
           </p>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardDescription>Dune-measured contract activity</CardDescription>
+          <CardTitle>Network usage</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
+            <Metric label="Active wallets" value={fmtCount(data.onchain.active_wallets)} />
+            <Metric label="Transactions" value={fmtCount(data.onchain.tx_count)} />
+            <Metric label="Transfer volume" value={fmtUsd(data.onchain.tx_volume_usd)} />
+            <Metric
+              label="Returning wallets"
+              value={fmtReturning(data.onchain.returning_wallets, data.onchain.returning_wallet_share)}
+            />
+          </div>
+          <p className="mt-3 text-xs leading-relaxed text-muted-foreground">
+            These count activity at the protocol&apos;s tracked contracts, not
+            unique users: a router or wrapper contract inflates the transaction
+            count without meaning more people, and transfer volume counts inflows
+            only, so the two legs of a swap are not both counted. Usage evidence,
+            deliberately not an input to the composite score below.
+          </p>
+          <OnchainStatusLine activity={data.onchain} />
         </CardContent>
       </Card>
 
@@ -124,14 +161,14 @@ async function ProtocolContent({ params }: { params: Promise<{ slug: string }> }
           <CardContent>
             <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
               <Metric label="Worst 30d peg deviation" value={fmtBps(o.depeg_worst_bps)} />
-              <Metric label="Tracked coin" value={o.depeg_asset ?? "—"} />
+              <Metric label="Tracked coin" value={o.depeg_asset ?? "n/a"} />
             </div>
             <p className="mt-3 text-xs leading-relaxed text-muted-foreground">
               Deviation from the $1.00 peg, measured from DefiLlama price history
               over the trailing window. A larger move means the coin traded away
-              from its peg at some point — a prompt to verify the peg mechanism,
-              not proof of an ongoing depeg. Protocols that mint no tracked
-              stablecoin show nothing here.
+              from its peg at some point. It is a prompt to verify the peg
+              mechanism, not proof of an ongoing depeg. Protocols that mint no
+              tracked stablecoin show nothing here.
             </p>
           </CardContent>
         </Card>
@@ -156,7 +193,7 @@ async function ProtocolContent({ params }: { params: Promise<{ slug: string }> }
           {data.data_gaps.length > 0 && (
             <p className="text-xs text-muted-foreground">
               <span className="font-medium text-foreground">Data gaps: </span>
-              {data.data_gaps.join(", ")} — excluded from the composite rather than
+              {data.data_gaps.join(", ")}. Excluded from the composite rather than
               treated as &quot;safe&quot;.
             </p>
           )}
@@ -228,7 +265,7 @@ async function ProtocolContent({ params }: { params: Promise<{ slug: string }> }
                 </a>
               ))}
             </p>
-            <BriefDownloads slug={data.slug} />
+            <BriefDownloads slug={data.slug} blockedReason={exportBlocked} />
           </CardContent>
         </Card>
       )}
@@ -289,36 +326,177 @@ const EXPORT_FORMATS = [
   { format: "pdf", label: "PDF" },
 ] as const;
 
+/**
+ * Why a download would be refused, or `null` if it is allowed.
+ *
+ * Both gates are mirrored from FastAPI so the button is disabled *before* the
+ * click: RBAC (does the role hold `briefs:export`?) and the ABAC confidence gate
+ * (a low-confidence brief needs risk-officer sign-off). FastAPI re-decides on
+ * the real request — this only avoids a dead-end click.
+ */
+function briefExportGate(
+  session: Session | null,
+  brief: ResearchBrief | null,
+): string | null {
+  if (!brief) return null;
+  if (!hasPermission(session, "briefs:export")) {
+    const role = session?.subject.role ?? "anonymous";
+    return `Your role (${role}) cannot export briefs; analyst or above required.`;
+  }
+  const role = session?.subject.role;
+  const maySignOff = role === "risk_officer" || role === "admin";
+  if (brief.sections.confidence === "low" && !maySignOff) {
+    const gaps = brief.sections.data_gaps.length;
+    return `Brief confidence is low (${gaps} data gap${gaps === 1 ? "" : "s"}); export needs risk-officer sign-off.`;
+  }
+  return null;
+}
+
 // Server-rendered download links: each anchors to the same-origin
 // /api/brief-export proxy, so no client JS and the API host stays server-only.
-function BriefDownloads({ slug }: { slug: string }) {
+function BriefDownloads({
+  slug,
+  blockedReason,
+}: {
+  slug: string;
+  blockedReason: string | null;
+}) {
+  const base =
+    "inline-flex items-center rounded-md border border-input px-2.5 py-1 text-xs font-medium";
   return (
-    <div className="mt-4 flex flex-wrap items-center gap-2">
-      <span className="text-xs text-muted-foreground">Download brief:</span>
-      {EXPORT_FORMATS.map(({ format, label }) => (
-        <a
-          key={format}
-          href={`/api/brief-export/${encodeURIComponent(slug)}?format=${format}`}
-          download
-          className="inline-flex items-center rounded-md border border-input bg-transparent px-2.5 py-1 text-xs font-medium transition-colors hover:bg-accent hover:text-accent-foreground"
-        >
-          {label}
-        </a>
-      ))}
+    <div className="mt-4 space-y-1.5">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-xs text-muted-foreground">Download brief:</span>
+        {EXPORT_FORMATS.map(({ format, label }) =>
+          blockedReason ? (
+            <span
+              key={format}
+              aria-disabled="true"
+              title={blockedReason}
+              className={`${base} cursor-not-allowed border-dashed text-muted-foreground/60`}
+            >
+              {label}
+            </span>
+          ) : (
+            <a
+              key={format}
+              href={`/api/brief-export/${encodeURIComponent(slug)}?format=${format}`}
+              download
+              className={`${base} bg-transparent transition-colors hover:bg-accent hover:text-accent-foreground`}
+            >
+              {label}
+            </a>
+          ),
+        )}
+      </div>
+      {blockedReason && (
+        <p className="text-xs leading-relaxed text-amber-700 dark:text-amber-300">
+          Export disabled: {blockedReason}
+        </p>
+      )}
     </div>
   );
 }
 
-// A 0..1 fraction rendered as a percent; null stays an em dash (a data gap).
+/**
+ * Shown when FastAPI refuses access to this protocol (data scope).
+ * Names the policy and the attribute that failed so the denial is auditable by
+ * the person who hit it.
+ */
+function DenialPanel({ denial }: { denial: ApiError }) {
+  return (
+    <div className="mx-auto max-w-5xl space-y-3">
+      <nav className="text-xs text-muted-foreground">
+        <Link href="/" className="hover:text-foreground">
+          ← Dashboard
+        </Link>
+      </nav>
+      <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-4 sm:p-6">
+        <h1 className="mb-1 flex items-center gap-2 text-lg font-semibold text-amber-800 dark:text-amber-200">
+          <LockKeyhole className="size-4" /> {denial.reason}
+        </h1>
+        <p className="text-sm text-amber-700/80 dark:text-amber-300/80">
+          {denial.policy === "scope.category_chain"
+            ? "Data scope is applied per category and primary chain, so a protocol outside your remit is not readable even though the rest of the board is."
+            : "The API refused this request. Ask an administrator if you believe you should have access."}
+        </p>
+        <p className="mt-2 text-xs text-amber-700/70 dark:text-amber-300/70">
+          policy: <code className="font-mono">{denial.policy ?? "unknown"}</code>
+          {denial.failedPredicate && (
+            <>
+              {" · failed predicate: "}
+              <code className="font-mono">{denial.failedPredicate}</code>
+            </>
+          )}
+        </p>
+      </div>
+    </div>
+  );
+}
+
+// A 0..1 fraction rendered as a percent; null reads n/a (a data gap).
 function fmtRatio(v: number | null | undefined): string {
-  if (v == null) return "—";
+  if (v == null) return "n/a";
   return `${(v * 100).toFixed(2)}%`;
 }
 
-// Basis points from the $1 peg; null stays an em dash (a data gap).
+// Whole counts with separators (locale pinned so server and client agree);
+// null reads n/a, never 0.
+function fmtCount(v: number | null | undefined): string {
+  if (v == null) return "n/a";
+  return Math.round(v).toLocaleString("en-US");
+}
+
+// "1,204 · 38.10%" when both are known, the bare count when the share is not,
+// and n/a when neither is.
+function fmtReturning(count: number | null | undefined, share: number | null | undefined): string {
+  if (count == null) return "n/a";
+  if (share == null) return fmtCount(count);
+  return `${fmtCount(count)} · ${fmtRatio(share)}`;
+}
+
+// Basis points from the $1 peg; null reads n/a (a data gap).
 function fmtBps(v: number | null | undefined): string {
-  if (v == null) return "—";
+  if (v == null) return "n/a";
   return `${v.toFixed(0)} bps`;
+}
+
+/**
+ * One line stating why the numbers above may be missing or incomplete.
+ *
+ * The status is decided by the backend (key? mapping? rows? complete newest
+ * day?) and this only phrases it. The page must not re-derive freshness from
+ * `as_of`, or the two would disagree the moment the stale window is retuned.
+ */
+function OnchainStatusLine({ activity }: { activity: OnchainActivity }) {
+  const covered = activity.chains.length ? activity.chains.join(", ") : null;
+  if (activity.status === "ok") {
+    return (
+      <p className="mt-2 text-xs text-muted-foreground">
+        Measured on {covered} · as of {activity.as_of}
+      </p>
+    );
+  }
+  if (activity.status === "partial") {
+    return (
+      <p className="mt-2 text-xs leading-relaxed text-amber-700 dark:text-amber-300">
+        Partial coverage: {activity.note}
+        {covered ? ` Figures cover ${covered} only.` : ""}
+      </p>
+    );
+  }
+  if (activity.status === "stale") {
+    return (
+      <p className="mt-2 text-xs leading-relaxed text-amber-700 dark:text-amber-300">
+        Data freshness: {activity.note} Treat on-chain conclusions as provisional.
+      </p>
+    );
+  }
+  // `unconfigured` / `no_data`: the backend's note already explains the gap,
+  // and naming the missing environment variable is the whole point of it.
+  return (
+    <p className="mt-2 text-xs leading-relaxed text-muted-foreground">{activity.note}</p>
+  );
 }
 
 function Metric({ label, value }: { label: string; value: string }) {

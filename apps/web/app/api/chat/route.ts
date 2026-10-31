@@ -1,7 +1,7 @@
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 
-import { api } from "@/lib/api";
+import { ApiError, api } from "@/lib/api";
 
 // Same-origin proxy for the non-streaming chat fallback. The browser hits this
 // Next endpoint (never the compose-internal API host directly); we forward the
@@ -24,6 +24,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     const answer = await api.chat(question, protocolSlug);
     return NextResponse.json(answer);
   } catch (e) {
+    // A refusal keeps its own status: `chat:ask` missing or an expired session is
+    // an authorization answer, not the "API unavailable" a 502 would imply.
+    if (e instanceof ApiError) {
+      return NextResponse.json(e.toJSON(), { status: e.status });
+    }
     const message = e instanceof Error ? e.message : String(e);
     return NextResponse.json({ error: message }, { status: 502 });
   }

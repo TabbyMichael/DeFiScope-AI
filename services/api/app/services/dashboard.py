@@ -4,6 +4,11 @@ The board renders from `protocol_snapshots` / `alert_records`. Only when the
 DB is empty or its newest capture is stale do we run a live monitoring pass
 (which also backfills history), so normal dashboard loads never hit
 DefiLlama directly.
+
+Reads are scope-aware: an analyst restricted to two categories sees *their*
+board, and every aggregate below is computed over the visible rows only. A
+scoped user reading a "total TVL" summed across protocols they cannot open
+would be a correctness bug, not a cosmetic one.
 """
 
 from __future__ import annotations
@@ -25,6 +30,7 @@ from app.schemas import (
     RiskPoint,
     TvlPoint,
 )
+from app.security.principal import ANONYMOUS, Scope, Subject
 
 # If the newest capture is older than this, treat the board as stale and run a
 # live hydration pass. The scheduler captures every 30 min, so this only
@@ -74,7 +80,20 @@ def row_to_overview(r: ProtocolSnapshot) -> ProtocolOverview:
     )
 
 
-def latest_rows(session: Session) -> list[ProtocolSnapshot]:
+def _scope_rows(rows: list[ProtocolSnapshot], scope: Scope | None) -> list[ProtocolSnapshot]:
+    """Drop rows outside the subject's data scope.
+
+    Filtered in Python rather than SQL on purpose: ``Scope.allows`` denies an
+    *unknown* attribute (a row with no category) when a restriction is
+    configured, and it is the exact predicate the detail endpoints use - so a
+    row can never be listed but un-openable, or vice versa.
+    """
+    if scope is None or not scope.restricted:
+        return rows
+    return [r for r in rows if scope.allows(r.category, r.top_chain)]
+
+
+def latest_rows(session: Session, scope: Scope | None = None) -> list[ProtocolSnapshot]:
     """Newest snapshot per slug via a max(date) group-by joined back.
 
     The join can theoretically return more than one row per slug if duplicate
@@ -104,7 +123,41 @@ def latest_rows(session: Session) -> list[ProtocolSnapshot]:
     for r in rows:
         if r.slug not in by_slug:
             by_slug[r.slug] = r
-    return list(by_slug.values())
+    return _scope_rows(list(by_slug.values()), scope)
+
+
+def latest_row_for(session: Session, slug: str) -> ProtocolSnapshot | None:
+    """Newest snapshot for one slug - the attribute bag a scope check needs."""
+    return (
+        session.query(ProtocolSnapshot)
+        .filter(ProtocolSnapshot.slug == slug)
+        .order_by(ProtocolSnapshot.date.desc())
+        .first()
+    )
+
+
+def freshness_hours(session: Session) -> float | None:
+    """Hours since the newest capture, or None when nothing is stored yet.
+
+    Kept here (next to ``STALE_AFTER``) so the manual-run policy and the
+    dashboard's own staleness check cannot drift apart."""
+    newest = session.query(func.max(ProtocolSnapshot.captured_at)).scalar()
+    if newest is None:
+        return None
+    if newest.tzinfo is None:
+        newest = newest.replace(tzinfo=UTC)
+    return max(0.0, (datetime.now(UTC) - newest).total_seconds() / 3600)
+
+
+def visible_slugs(session: Session, subject: Subject) -> set[str] | None:
+    """The slugs this subject may see, or None when unrestricted.
+
+    The single source of truth for "what is in scope" outside the board itself:
+    alert feeds, chat citations and per-slug detail checks all narrow to this
+    set, so they cannot disagree about whether a protocol is visible."""
+    if not subject.scope.restricted:
+        return None
+    return {r.slug for r in latest_rows(session, subject.scope)}
 
 
 def sparklines(
@@ -159,15 +212,25 @@ def risk_history(session: Session, slug: str, days: int = 90) -> list[RiskPoint]
     return [RiskPoint(date=r.date, score=r.risk_score, band=r.risk_band) for r in reversed(rows)]
 
 
-def aggregate_history(session: Session, days: int = 90) -> list[TvlPoint]:
-    """Board-level TVL trend: sum of all tracked protocols per observation
-    date, over the trailing window."""
+def aggregate_history(
+    session: Session, days: int = 90, slugs: list[str] | None = None
+) -> list[TvlPoint]:
+    """Board-level TVL trend: sum of all *visible* protocols per observation
+    date, over the trailing window.
+
+    ``slugs`` is the caller's visible set. Passing an empty list is not the same
+    as None: a scoped subject who can see nothing gets an empty series rather
+    than the whole market's total."""
+    if slugs is not None and not slugs:
+        return []
+    query = session.query(
+        ProtocolSnapshot.date,
+        func.sum(ProtocolSnapshot.tvl).label("total"),
+    )
+    if slugs is not None:
+        query = query.filter(ProtocolSnapshot.slug.in_(slugs))
     rows = (
-        session.query(
-            ProtocolSnapshot.date,
-            func.sum(ProtocolSnapshot.tvl).label("total"),
-        )
-        .group_by(ProtocolSnapshot.date)
+        query.group_by(ProtocolSnapshot.date)
         .order_by(ProtocolSnapshot.date.desc())
         .limit(days)
         .all()
@@ -220,25 +283,36 @@ def _is_stale(rows: list[ProtocolSnapshot]) -> bool:
     return datetime.now(UTC) - newest > STALE_AFTER
 
 
-async def get_dashboard(svc, http, session: Session) -> DashboardResponse:
+async def get_dashboard(
+    svc, http, session: Session, subject: Subject | None = None
+) -> DashboardResponse:
     """DB-first with live fallback: hydrate via a monitoring pass when empty
-    or stale, then assemble the response entirely from the DB."""
+    or stale, then assemble the response entirely from the DB.
+
+    Freshness is judged on the *whole* dataset, not the caller's slice: a scope
+    that happens to match no rows must not re-trigger a full crawl on every
+    page load. Presentation is then narrowed to the subject's scope."""
     from app.services import alerts as alert_engine
 
-    rows = latest_rows(session)
-    if _is_stale(rows):
+    subject = subject or ANONYMOUS
+    all_rows = latest_rows(session)
+    if _is_stale(all_rows):
         # Serialize hydration so a burst of requests on a cold DB runs a single
         # DefiLlama crawl; re-check staleness inside the lock (another request
         # may have just refreshed the board).
         async with _hydration_lock:
-            rows = latest_rows(session)
-            if _is_stale(rows):
+            all_rows = latest_rows(session)
+            if _is_stale(all_rows):
                 await alert_engine.run_monitor(svc, http, session)
-                rows = latest_rows(session)
+                all_rows = latest_rows(session)
+
+    rows = _scope_rows(all_rows, subject.scope)
+    visible_slugs = sorted(r.slug for r in rows) if subject.scope.restricted else None
 
     # Single, consistent alert source for both the fresh and hydrated paths.
-    # Read today's persisted alerts from the shared helper (no crawl here).
-    alerts = alert_engine.today_alerts(session)
+    # Read today's persisted alerts from the shared helper (no crawl here), then
+    # apply the scope + severity gates: content may be withheld, the count is not.
+    alerts, withheld = alert_engine.today_alerts_for(session, subject, visible_slugs=visible_slugs)
 
     protocols = [row_to_overview(r) for r in rows]
     series = sparklines(session, [p.slug for p in protocols], SPARKLINE_DAYS)
@@ -253,6 +327,7 @@ async def get_dashboard(svc, http, session: Session) -> DashboardResponse:
         stats=stats,
         protocols=protocols,
         alerts=alerts,
-        aggregate_history=aggregate_history(session),
+        aggregate_history=aggregate_history(session, slugs=visible_slugs),
         as_of=as_of,
+        withheld_alerts=withheld,
     )

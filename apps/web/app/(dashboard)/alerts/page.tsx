@@ -2,6 +2,7 @@ import { Suspense } from "react";
 import { Bell, Inbox } from "lucide-react";
 
 import AlertItem, { severityStyle } from "@/components/dashboard/alert-item";
+import WithheldBanner from "@/components/dashboard/withheld-banner";
 import RunCheck from "@/components/run-check";
 import {
   Card,
@@ -11,7 +12,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { api } from "@/lib/api";
+import { ApiError, api } from "@/lib/api";
 import type { Alert } from "@/lib/types";
 
 const SEVERITY_ORDER = ["critical", "warning", "info"] as const;
@@ -44,11 +45,37 @@ function SeverityChip({ severity, count }: { severity: string; count: number }) 
 async function AlertsContent() {
   let current: Alert[] = [];
   let history: Alert[] = [];
+  let withheld = 0;
+  let historyWithheld = 0;
   let error: string | null = null;
+  let denial: ApiError | null = null;
   try {
-    [current, history] = await Promise.all([api.alerts(), api.alertHistory()]);
+    const [today, past] = await Promise.all([api.alerts(), api.alertHistory()]);
+    current = today.alerts;
+    withheld = today.withheld;
+    history = past.alerts;
+    historyWithheld = past.withheld;
   } catch (e) {
-    error = e instanceof Error ? e.message : String(e);
+    // A 403 here is an authorization verdict, not an outage — say so plainly
+    // instead of blaming the backend for being down.
+    if (e instanceof ApiError && e.isDenial) denial = e;
+    else error = e instanceof Error ? e.message : String(e);
+  }
+
+  if (denial) {
+    return (
+      <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-4 text-sm sm:p-6">
+        <h2 className="mb-1 flex items-center gap-2 font-semibold text-amber-800 dark:text-amber-200">
+          <Inbox className="size-4" /> {denial.reason}
+        </h2>
+        {denial.policy && (
+          <p className="text-xs text-amber-700/80 dark:text-amber-300/80">
+            policy: <code className="font-mono">{denial.policy}</code>
+            {denial.permission && ` · needs ${denial.permission}`}
+          </p>
+        )}
+      </div>
+    );
   }
 
   if (error) {
@@ -86,10 +113,15 @@ async function AlertsContent() {
           </div>
         </CardHeader>
         <CardContent className="space-y-2">
+          <WithheldBanner withheld={withheld} />
           {current.length === 0 ? (
             <AlertEmptyState
-              title="No rules triggered"
-              hint="Quiet ≠ safe: rules only fire on TVL-observable signals. Open a protocol to review its full risk evidence."
+              title={withheld > 0 ? "Nothing you are cleared to read" : "No rules triggered"}
+              hint={
+                withheld > 0
+                  ? "Alerts did fire, but all of them are above your clearance. Ask a risk officer to review them."
+                  : "Quiet ≠ safe: rules only fire on TVL-observable signals. Open a protocol to review its full risk evidence."
+              }
             />
           ) : (
             current.map((a) => <AlertItem key={a.id} alert={a} />)
@@ -105,6 +137,7 @@ async function AlertsContent() {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-2">
+          <WithheldBanner withheld={historyWithheld} />
           {history.length === 0 ? (
             <AlertEmptyState
               title="No persisted triggers yet"

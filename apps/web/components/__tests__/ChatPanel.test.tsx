@@ -47,7 +47,9 @@ describe("ChatPanel", () => {
   });
 
   it("streams tokens over the WebSocket and never calls POST", async () => {
-    const fetchMock = vi.fn();
+    // The ticket mint is the one fetch the WS path is allowed to make; fail it
+    // so the socket opens unauthenticated (the `auth_mode=off` shape).
+    const fetchMock = vi.fn().mockRejectedValue(new Error("no ticket"));
     vi.stubGlobal("fetch", fetchMock);
 
     class FakeWS {
@@ -85,6 +87,59 @@ describe("ChatPanel", () => {
     expect(await screen.findByText(/Real yield \[1\]/)).toBeInTheDocument();
     expect(screen.getByText("Methodology")).toBeInTheDocument();
     expect(screen.getByText("model: gpt-4o-mini")).toBeInTheDocument();
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalledWith("/api/chat", expect.anything());
+  });
+
+  it("mints a WS ticket and retries once on a 1008 policy violation", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ ticket: "tkt-1", expires_in: 60 }),
+    } as unknown as Response);
+    vi.stubGlobal("fetch", fetchMock);
+
+    const opened: string[] = [];
+    class TicketWS {
+      static OPEN = 1;
+      readyState = 1;
+      onopen?: () => void;
+      onmessage?: (ev: { data: string }) => void;
+      onclose?: (ev: { code: number }) => void;
+      onerror?: () => void;
+      constructor(url: string) {
+        opened.push(url);
+        setTimeout(() => {
+          if (opened.length === 1) {
+            // First attempt: the API rejects the socket as a policy violation.
+            this.onclose?.({ code: 1008 });
+            return;
+          }
+          this.onopen?.();
+        }, 0);
+      }
+      send() {
+        setTimeout(() => {
+          this.onmessage?.({
+            data: JSON.stringify({
+              type: "done",
+              answer: { ...ANSWER, answer: "Real yield [1].", generated_by: "llm", model: "gpt-4o-mini" },
+            }),
+          });
+        }, 0);
+      }
+      close() {
+        this.onclose?.({ code: 1000 });
+      }
+    }
+    vi.stubGlobal("WebSocket", TicketWS);
+
+    render(<ChatPanel protocols={[]} />);
+    askQuestion();
+
+    expect(await screen.findByText(/Real yield \[1\]/)).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith("/api/auth/ticket", expect.objectContaining({ method: "POST" }));
+    expect(opened[0]).toContain("?ticket=tkt-1");
+    // The 1008 close triggered a second connection with a fresh ticket.
+    expect(opened).toHaveLength(2);
+    expect(fetchMock).not.toHaveBeenCalledWith("/api/chat", expect.anything());
   });
 });

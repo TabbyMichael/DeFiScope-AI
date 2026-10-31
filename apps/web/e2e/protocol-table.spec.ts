@@ -46,10 +46,14 @@ test.describe("protocol table", () => {
     const target = present[0];
     const expectedRows = initialBands.filter((b) => b === target).length;
 
-    await page.getByRole("button", { name: "All risk bands" }).click();
+    // The shadcn Select trigger exposes role="combobox" with the label set on
+    // the trigger (aria-label), so name it rather than looking for a button.
+    await page.getByRole("combobox", { name: "Filter by risk band" }).click();
     await page.getByRole("option", { name: target, exact: true }).click();
 
-    await expect(page.getByRole("button", { name: target, exact: true })).toBeVisible();
+    await expect(
+      page.getByRole("combobox", { name: "Filter by risk band" }),
+    ).toContainText(target);
     const filtered = page.locator("main table tbody tr td:last-child");
     await expect(filtered).toHaveCount(expectedRows);
     for (const text of await filtered.allTextContents()) {

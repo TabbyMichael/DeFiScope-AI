@@ -10,7 +10,8 @@ DeFiScope answers three questions for any protocol:
 3. What should an analyst investigate, monitor, or avoid next?
 
 Built on live [DefiLlama](https://defillama.com) data (public API, no key
-required). Try it on [Aave](http://localhost:3000/protocols/aave-v3) vs
+required), with [Dune](https://dune.com) as an optional second provider for
+contract-level on-chain activity. Try it on [Aave](http://localhost:3000/protocols/aave-v3) vs
 [Uniswap](http://localhost:3000/protocols/uniswap-v3).
 
 ## Features
@@ -43,9 +44,33 @@ npm run dev
 cp ../../.env.example services/api/.env   # from apps/web; then set DEFISCOPE_OPENAI_API_KEY
 ```
 
-Open http://localhost:3000. API docs at http://localhost:8000/docs.
+Open http://localhost:3000 and sign in. API docs at http://localhost:8000/docs.
 
 Docker alternative (api + web + Postgres): `docker compose up --build`.
+
+### Demo accounts
+
+The showcase runs in `demo` mode (`DEFISCOPE_AUTH_MODE=demo`), which seeds four
+local accounts. The password is the same for all of them
+(`DEFISCOPE_AUTH_DEMO_PASSWORD`, default `defiscope-demo`) — published on purpose
+because these are demo identities, not credentials to reuse anywhere.
+
+| Account | Role | Clearance | Scope | What it demonstrates |
+|---|---|---|---|---|
+| `viewer@demo` | viewer | 1 | all categories | Read-only. Critical alerts are **counted but withheld** |
+| `analyst@demo` | analyst | 1 | `Lending` + `Dexes` | ABAC data scoping: the board, protocol pages and summaries are filtered to that slice |
+| `officer@demo` | risk_officer | 2 | all categories | Unlocks critical-alert content and low-confidence brief export |
+| `admin@demo` | admin | 3 | all categories | Every permission, including `POST /api/alerts/run` past the freshness/business-hours gates |
+
+Switch roles from the avatar menu in the header (`demo` mode only) to watch the
+board, the withheld-alert banner and the disabled export buttons change. Denials
+are explained inline — a fresh snapshot or an out-of-scope protocol renders the
+policy name and the failing condition rather than a generic error.
+
+Guarding is enforced by FastAPI, not the UI: the published API port (`:8000`, or
+`:3646` under compose) and the WebSocket are reachable without Next, so both
+require a bearer token. Set `DEFISCOPE_AUTH_MODE=off` for the pre-auth
+open-demo behaviour, or `required` to drop the seeds and the role switcher.
 
 ### Task runner
 
@@ -239,14 +264,20 @@ Deep-dive docs: [methodology](docs/methodology.md) ·
 
 Shipped since the MVP: fee/revenue/DEX-volume join (decomposes price vs usage),
 stablecoin depeg watch, PDF/CSV/Markdown export, risk-score history, alert
-delivery, side-by-side comparison, and the grounded RAG chat.
+delivery, side-by-side comparison, the grounded RAG chat, and Dune-powered
+on-chain activity (active wallets, transactions, transfer volume, returning
+wallets) as a second, additive provider — shown and cited, deliberately not yet
+scored.
 
 Still open (see [docs/modernization-roadmap.md](docs/modernization-roadmap.md)):
 
-1. Auth + rate limiting on the mutating/admin routes (a must-fix before any
-   public deploy — `POST /api/alerts/run` is an unauthenticated crawl today).
-2. Dune-powered on-chain activity (daily users, real volume, liquidations) for a
-   flagship protocol; move beyond the TVL proxy.
+1. Per-subject rate limiting and LLM cost quotas (auth shipped — RBAC + ABAC,
+   opaque sessions and WS tickets — so anonymous crawl/spend is closed; a logged-in
+   account burning the budget is the one remaining exposure).
+2. Folding on-chain activity into the risk score — gated on the calibration bar in
+   [docs/methodology.md](docs/methodology.md): ≥6 months of history, a written
+   hypothesis, and a backtest showing it adds signal without double-counting
+   volume/TVL.
 3. Cross-protocol correlation / stablecoin-contagion mapping.
 4. Adaptive anomaly detection (replacing static thresholds) and price-normalized
    TVL once a reliable protocol→token map exists.

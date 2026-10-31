@@ -5,7 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { API_WS_URL } from "@/lib/api";
+import { API_WS_URL } from "@/lib/api-config";
 import type { ChatAnswer, ChatCitation } from "@/lib/types";
 
 type Role = "user" | "assistant";
@@ -37,6 +37,30 @@ const EXAMPLES = [
 // If the socket never opens this fast, assume WS is blocked and fall back.
 const OPEN_TIMEOUT_MS = 6000;
 
+// RFC 6455 policy violation: the API uses it when the WS ticket is missing,
+// expired or already redeemed. Worth exactly one retry with a fresh ticket.
+const WS_POLICY_VIOLATION = 1008;
+
+/**
+ * Exchange the httpOnly session cookie for a single-use WS ticket.
+ *
+ * Returns `""` when there is no ticket to be had — either `auth_mode=off`
+ * (where the socket accepts the connection without one) or a failure, in which
+ * case the socket is refused and we degrade to the POST proxy. The session
+ * token itself is never put in a URL: a ticket lives 60 seconds and dies on
+ * first use.
+ */
+async function fetchTicket(): Promise<string> {
+  try {
+    const res = await fetch("/api/auth/ticket", { method: "POST" });
+    if (!res?.ok) return "";
+    const data = (await res.json()) as { ticket?: string };
+    return data?.ticket ?? "";
+  } catch {
+    return "";
+  }
+}
+
 /**
  * Ask a question, preferring the streaming WS and auto-falling back to the
  * same-origin POST proxy. Returns a cancel function. Kept as a plain helper (not
@@ -54,10 +78,21 @@ export function streamAsk(
   },
 ): () => void {
   let settled = false;
-  let ws: WebSocket | null = null;
+  let cancelled = false;
+  let socket: WebSocket | null = null;
+  let openTimer: ReturnType<typeof setTimeout> | null = null;
+  /** A 1008 close gets exactly one retry, with a freshly minted ticket. */
+  let retried = false;
+
+  const stopTimer = () => {
+    if (openTimer) {
+      clearTimeout(openTimer);
+      openTimer = null;
+    }
+  };
 
   const fallbackToPost = () => {
-    if (settled) return;
+    if (settled || cancelled) return;
     settled = true;
     fetch("/api/chat", {
       method: "POST",
@@ -76,66 +111,87 @@ export function streamAsk(
     return () => {};
   }
 
-  try {
-    ws = new WebSocket(`${API_WS_URL}/ws/chat`);
-  } catch {
-    fallbackToPost();
-    return () => {};
-  }
+  const connect = async () => {
+    const ticket = await fetchTicket();
+    if (cancelled || settled) return;
 
-  // If the socket never opens this fast, assume WS is blocked and fall back.
-  const openTimer = setTimeout(() => {
-    if (!settled && ws && ws.readyState !== WebSocket.OPEN) {
-      try {
-        ws.close();
-      } catch {
-        /* ignore */
-      }
-      fallbackToPost();
-    }
-  }, OPEN_TIMEOUT_MS);
+    const url = ticket
+      ? `${API_WS_URL}/ws/chat?ticket=${encodeURIComponent(ticket)}`
+      : `${API_WS_URL}/ws/chat`;
 
-  ws.onopen = () => ws?.send(JSON.stringify({ question, protocol_slug: protocolSlug }));
-  ws.onerror = () => {
-    clearTimeout(openTimer);
-    if (!settled) fallbackToPost();
-  };
-  ws.onclose = () => {
-    clearTimeout(openTimer);
-    // Closed before a `done` frame arrived -> the stream was cut; degrade.
-    if (!settled) fallbackToPost();
-  };
-  ws.onmessage = (ev: MessageEvent) => {
-    let frame: Frame;
     try {
-      frame = JSON.parse(String(ev.data)) as Frame;
+      socket = new WebSocket(url);
     } catch {
+      fallbackToPost();
       return;
     }
-    if (frame.type === "token" && frame.text) {
-      cb.onToken(frame.text);
-    } else if (frame.type === "citations" && frame.citations) {
-      cb.onCitations(frame.citations);
-    } else if (frame.type === "done" && frame.answer) {
-      settled = true;
-      clearTimeout(openTimer);
-      cb.onComplete(frame.answer, false);
-      try {
-        ws?.close();
-      } catch {
-        /* ignore */
+    const ws = socket;
+
+    // If the socket never opens this fast, assume WS is blocked and fall back.
+    openTimer = setTimeout(() => {
+      if (!settled && !cancelled && ws.readyState !== WebSocket.OPEN) {
+        try {
+          ws.close();
+        } catch {
+          /* ignore */
+        }
+        fallbackToPost();
       }
-    } else if (frame.type === "error") {
+    }, OPEN_TIMEOUT_MS);
+
+    ws.onopen = () => ws.send(JSON.stringify({ question, protocol_slug: protocolSlug }));
+    ws.onerror = () => {
+      stopTimer();
       if (!settled) fallbackToPost();
-    }
-    // "ping" frames are liveness noise; ignored.
+    };
+    ws.onclose = (ev: CloseEvent) => {
+      stopTimer();
+      if (settled || cancelled) return;
+      if (ev?.code === WS_POLICY_VIOLATION && !retried) {
+        // Ticket expired or already redeemed (the API accepts a fresh socket
+        // rather than reusing one), so mint a new one and try once more.
+        retried = true;
+        void connect();
+        return;
+      }
+      // Closed before a `done` frame arrived -> the stream was cut; degrade.
+      fallbackToPost();
+    };
+    ws.onmessage = (ev: MessageEvent) => {
+      let frame: Frame;
+      try {
+        frame = JSON.parse(String(ev.data)) as Frame;
+      } catch {
+        return;
+      }
+      if (frame.type === "token" && frame.text) {
+        cb.onToken(frame.text);
+      } else if (frame.type === "citations" && frame.citations) {
+        cb.onCitations(frame.citations);
+      } else if (frame.type === "done" && frame.answer) {
+        settled = true;
+        stopTimer();
+        cb.onComplete(frame.answer, false);
+        try {
+          ws.close();
+        } catch {
+          /* ignore */
+        }
+      } else if (frame.type === "error") {
+        if (!settled) fallbackToPost();
+      }
+      // "ping" frames are liveness noise; ignored.
+    };
   };
 
+  void connect();
+
   return () => {
+    cancelled = true;
     settled = true;
-    clearTimeout(openTimer);
+    stopTimer();
     try {
-      ws?.close();
+      socket?.close();
     } catch {
       /* ignore */
     }
@@ -244,7 +300,7 @@ export function ChatPanel({
         <CardContent className="flex items-start gap-3 pt-6 text-sm text-muted-foreground">
           <span className="mt-0.5 inline-block size-2 shrink-0 rounded-full bg-emerald-500" />
           <p>
-            Answers are grounded in DeFiScope&apos;s own evidence — methodology docs and each
+            Answers are grounded in DeFiScope&apos;s own evidence: methodology docs and each
             protocol&apos;s indicators, data gaps and alerts. Every claim cites a numbered source, and
             when the data can&apos;t establish something, it says so rather than guessing.
           </p>

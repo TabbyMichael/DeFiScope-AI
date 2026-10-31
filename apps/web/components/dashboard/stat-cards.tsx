@@ -8,7 +8,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { fmtPct, fmtUsd } from "@/lib/api";
+import { fmtPct, fmtUsd } from "@/lib/api-config";
 import type { DashboardStats } from "@/lib/types";
 
 const BAND_ORDER = ["low", "moderate", "elevated", "high", "unknown"] as const;
@@ -109,7 +109,7 @@ export default function StatCards({ stats }: { stats: DashboardStats }) {
           <CardTitle className="text-sm font-normal">TVL change, 7d</CardTitle>
         </CardHeader>
         <CardContent className="space-y-1 text-xs">
-          {movers === 0 && <span className="text-muted-foreground">—</span>}
+          {movers === 0 && <span className="text-muted-foreground">n/a</span>}
           {stats.top_gainer && (
             <Link
               href={`/protocols/${stats.top_gainer.slug}`}

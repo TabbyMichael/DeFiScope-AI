@@ -57,7 +57,7 @@ async function DashboardContent({
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Overview</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            TVL trends only — rising or falling TVL alone does not prove
+            TVL trends only. Rising or falling TVL alone does not prove
             sustainable growth or risk. Open a protocol for evidence and limitations.
           </p>
         </div>
@@ -82,7 +82,7 @@ async function DashboardContent({
         </div>
         <div className="space-y-6">
           <RiskWatchlist protocols={data.protocols} />
-          <AlertFeed alerts={data.alerts} />
+          <AlertFeed alerts={data.alerts} withheld={data.withheld_alerts} />
         </div>
       </div>
 

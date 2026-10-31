@@ -30,6 +30,13 @@ ENV NEXT_PUBLIC_API_PUBLIC_URL=$NEXT_PUBLIC_API_PUBLIC_URL
 # API port so the browser opens the chat socket directly against the api service.
 ARG NEXT_PUBLIC_API_WS_URL=ws://localhost:3646
 ENV NEXT_PUBLIC_API_WS_URL=$NEXT_PUBLIC_API_WS_URL
+# One-click demo sign-in buttons on /login. Build-time only (client bundle), so
+# a production image must NOT pass this. The password is likewise public by
+# design: the demo accounts are a tour, not a secret.
+ARG NEXT_PUBLIC_AUTH_DEMO=
+ENV NEXT_PUBLIC_AUTH_DEMO=$NEXT_PUBLIC_AUTH_DEMO
+ARG NEXT_PUBLIC_AUTH_DEMO_PASSWORD=defiscope-demo
+ENV NEXT_PUBLIC_AUTH_DEMO_PASSWORD=$NEXT_PUBLIC_AUTH_DEMO_PASSWORD
 ENV NEXT_TELEMETRY_DISABLED=1
 RUN npm run build
 

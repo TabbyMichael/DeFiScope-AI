@@ -12,6 +12,7 @@ import time
 from dataclasses import dataclass, field
 
 import httpx
+from sqlalchemy.orm import Session
 
 from app.analysis import metrics, scoring
 from app.clients.defillama import (
@@ -23,7 +24,14 @@ from app.clients.defillama import (
 )
 from app.config import Settings, get_settings
 from app.reference_data import load_stablecoin_mapping
-from app.schemas import ChainShare, ProtocolOverview, ProtocolResearch, TvlPoint
+from app.schemas import (
+    ChainShare,
+    OnchainActivityOut,
+    ProtocolOverview,
+    ProtocolResearch,
+    TvlPoint,
+)
+from app.services import onchain as onchain_service
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +53,11 @@ class ResearchPack:
     # or no price data (a gap, not an on-peg pass).
     minted_symbols: list[str] = field(default_factory=list)
     peg_histories: dict[str, list[tuple[int, float]]] = field(default_factory=dict)
+    # On-chain activity (Dune). Populated from the DB by ``get_pack`` when a
+    # session is available, never by a network call - see services/onchain.py.
+    # None means "not loaded on this path", which the response layer reports as
+    # an explicit gap rather than as zero activity.
+    onchain: onchain_service.OnchainActivity | None = None
 
     @property
     def slug(self) -> str:
@@ -127,11 +140,24 @@ class ProtocolResearchService:
         return curated + sorted(merged - set(curated))
 
     async def get_pack(
-        self, slug: str, http: httpx.AsyncClient, refresh: bool = False
+        self,
+        slug: str,
+        http: httpx.AsyncClient,
+        refresh: bool = False,
+        session: Session | None = None,
     ) -> ResearchPack:
         now = time.monotonic()
-        if not refresh and slug in self._cache and now - self._cache[slug][0] < CACHE_TTL_SECONDS:
-            return self._cache[slug][1]
+        cached = self._cache.get(slug)
+        if not refresh and cached is not None and now - cached[0] < CACHE_TTL_SECONDS:
+            pack = cached[1]
+            # On-chain activity is read from the DB, so keeping a cached pack's
+            # block current costs one indexed query and no HTTP. That matters
+            # because the HTTP cache and the observation table age at different
+            # rates (5 minutes vs a day), and a stale number here would be the
+            # one thing this block exists not to be.
+            if session is not None:
+                pack.onchain = onchain_service.load(session, slug, self.settings)
+            return pack
 
         detail = await self.client.get_protocol(http, slug)
         index = await self._protocol_index(http)
@@ -190,10 +216,14 @@ class ProtocolResearchService:
             minted_symbols=minted_symbols,
             peg_histories=peg_histories,
         )
+        if session is not None:
+            pack.onchain = onchain_service.load(session, slug, self.settings)
         self._remember(slug, pack, now)
         return pack
 
-    async def get_packs(self, slugs: list[str], http: httpx.AsyncClient) -> list[ResearchPack]:
+    async def get_packs(
+        self, slugs: list[str], http: httpx.AsyncClient, session: Session | None = None
+    ) -> list[ResearchPack]:
         """Fetch many packs concurrently (bounded by crawl_concurrency).
         A failing slug is logged and skipped - one bad entry must not sink
         the whole board."""
@@ -202,7 +232,7 @@ class ProtocolResearchService:
         async def one(slug: str) -> ResearchPack | None:
             async with sem:
                 try:
-                    return await self.get_pack(slug, http)
+                    return await self.get_pack(slug, http, session=session)
                 except Exception as exc:  # noqa: BLE001 - resilient crawl
                     logger.warning("Failed to load protocol %s: %s", slug, exc)
                     return None
@@ -262,6 +292,32 @@ def pack_to_overview(pack: ResearchPack) -> ProtocolOverview:
     )
 
 
+def _onchain_out(activity: onchain_service.OnchainActivity | None) -> OnchainActivityOut:
+    """Map the service value object onto the response contract.
+
+    ``None`` is a real possibility (a code path without a DB session), and it is
+    reported as an explicit gap: the schema field is non-optional precisely so
+    that "not loaded" can never be mistaken for "not measured" or for zero.
+    """
+    if not isinstance(activity, onchain_service.OnchainActivity):
+        return OnchainActivityOut(
+            status="unconfigured",
+            note="On-chain metrics were not loaded for this request.",
+        )
+    return OnchainActivityOut(
+        status=activity.status,
+        as_of=activity.as_of,
+        chains=activity.chains,
+        missing_chains=activity.missing_chains,
+        active_wallets=activity.active_wallets,
+        tx_count=activity.tx_count,
+        tx_volume_usd=activity.tx_volume_usd,
+        returning_wallets=activity.returning_wallets,
+        returning_wallet_share=activity.returning_wallet_share,
+        note=activity.note,
+    )
+
+
 def pack_to_research(pack: ResearchPack, window_days: int = 180) -> ProtocolResearch:
     df = pack.tvl_df
     series = []
@@ -287,6 +343,7 @@ def pack_to_research(pack: ResearchPack, window_days: int = 180) -> ProtocolRese
         tvl_series=series,
         chains=chains,
         risk=risk.to_dict() if risk else {},
+        onchain=_onchain_out(pack.onchain),
         data_gaps=risk.data_gaps if risk else [],
         as_of=pack.latest_date or "n/a",
         sources=[

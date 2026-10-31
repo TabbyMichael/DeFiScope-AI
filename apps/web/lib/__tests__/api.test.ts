@@ -41,9 +41,9 @@ describe("fmtUsd", () => {
     expect(fmtUsd(950)).toBe("$950");
   });
 
-  it("renders a dash for missing values", () => {
-    expect(fmtUsd(null)).toBe("—");
-    expect(fmtUsd(undefined)).toBe("—");
+  it("renders n/a for missing values", () => {
+    expect(fmtUsd(null)).toBe("n/a");
+    expect(fmtUsd(undefined)).toBe("n/a");
   });
 });
 
@@ -53,8 +53,8 @@ describe("fmtPct", () => {
     expect(fmtPct(-8.2, 2)).toBe("-8.20%");
   });
 
-  it("renders a dash for missing values", () => {
-    expect(fmtPct(null)).toBe("—");
+  it("renders n/a for missing values", () => {
+    expect(fmtPct(null)).toBe("n/a");
   });
 });
 

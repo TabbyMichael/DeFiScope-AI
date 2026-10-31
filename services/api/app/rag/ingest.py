@@ -96,6 +96,7 @@ def _overview_lines(pack: ResearchPack) -> list[str]:
         lines.append(f"largest chain {o.top_chain} ({share} of TVL)")
     if o.fees_30d is not None:
         lines.append(f"30d fees ${o.fees_30d:,.0f}")
+    lines.extend(_onchain_lines(pack))
     if o.depeg_worst_bps is not None:
         lines.append(
             f"worst stablecoin peg deviation {o.depeg_worst_bps:.0f} bps ({o.depeg_asset})"
@@ -103,6 +104,43 @@ def _overview_lines(pack: ResearchPack) -> list[str]:
     if o.stale_days is not None:
         lines.append(f"data freshness {o.stale_days}d old")
     return lines
+
+
+def _onchain_lines(pack: ResearchPack) -> list[str]:
+    """Two evidence lines about measured contract activity, or nothing at all.
+
+    Only ``ok`` and ``partial`` produce text: an unconfigured or empty provider is
+    an absence of evidence, and the chat must not be able to quote "no on-chain
+    activity" as if it were a finding. Partial coverage still speaks because the
+    chains that did report are real; the missing ones are omitted rather than
+    filled with zeros.
+    """
+    oc = pack.onchain
+    if oc is None or oc.status not in ("ok", "partial"):
+        return []
+    values: list[str] = []
+    if oc.active_wallets is not None:
+        values.append(f"{oc.active_wallets:,} active wallets")
+    if oc.tx_count is not None:
+        values.append(f"{oc.tx_count:,} transactions")
+    if oc.tx_volume_usd is not None:
+        values.append(f"${oc.tx_volume_usd:,.0f} transfer volume")
+    if oc.returning_wallets is not None:
+        share = (
+            f" ({oc.returning_wallet_share * 100:.0f}% of active)"
+            if oc.returning_wallet_share is not None
+            else ""
+        )
+        values.append(f"{oc.returning_wallets:,} returning wallets{share}")
+    if not values:
+        return []
+    chains = ", ".join(oc.chains) or "tracked chains"
+    return [
+        f"on-chain activity {oc.as_of or 'latest day'} on {chains}: " + "; ".join(values),
+        "on-chain figures are Dune-measured contract-level activity (distinct "
+        "senders to tracked contracts, inbound transfers only), not adjusted for "
+        "TVL and not an input to the risk score",
+    ]
 
 
 def chunks_from_pack(pack: ResearchPack, recent_alerts: list[str]) -> list[Chunk]:
@@ -164,7 +202,10 @@ async def build_chunks(
     alerts_by_slug = _recent_alerts_by_slug(session)
     for slug in _tracked_slugs(session):
         try:
-            pack = await research_service.get_pack(slug, http)
+            # The session is threaded through so the pack picks up persisted
+            # on-chain activity; without it those evidence lines could never
+            # reach the corpus, since only ``run_monitor`` ever calls Dune.
+            pack = await research_service.get_pack(slug, http, session=session)
         except Exception as exc:  # noqa: BLE001 - one bad protocol won't sink ingest
             logger.warning("Evidence ingest skipped for %s: %s", slug, type(exc).__name__)
             continue

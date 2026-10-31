@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 
@@ -82,6 +84,34 @@ class RiskAssessmentOut(BaseModel):
     data_gaps: list[str] = Field(default_factory=list)
 
 
+class OnchainActivityOut(BaseModel):
+    """On-chain activity from Dune - the second, additive data provider.
+
+    Always present on a research payload, because *why* there is no number is
+    part of the answer: ``unconfigured`` (no key), ``no_data`` (no curated
+    mapping or nothing captured yet), ``stale``, ``partial`` (a mapped chain
+    did not report) or ``ok``. An omitted block could not tell those apart, and
+    a zero would assert "no activity" - a claim these measurements never make.
+
+    ``source`` is per block rather than per protocol: this block is Dune's,
+    while ``ProtocolOverview.source`` stays DefiLlama's.
+    """
+
+    source: Literal["dune"] = "dune"
+    status: Literal["ok", "partial", "stale", "no_data", "unconfigured"]
+    as_of: str | None = None
+    chains: list[str] = Field(default_factory=list)
+    missing_chains: list[str] = Field(default_factory=list)
+    active_wallets: int | None = None
+    tx_count: int | None = None
+    tx_volume_usd: float | None = None
+    returning_wallets: int | None = None
+    # Share of active wallets that had also been active in the prior 30 days.
+    # None when no wallets were active: 0/0 is undefined, not 0%.
+    returning_wallet_share: float | None = None
+    note: str | None = None
+
+
 class ProtocolResearch(BaseModel):
     slug: str
     name: str
@@ -91,6 +121,7 @@ class ProtocolResearch(BaseModel):
     tvl_series: list[TvlPoint] = Field(default_factory=list)
     chains: list[ChainShare] = Field(default_factory=list)
     risk: RiskAssessmentOut = Field(default_factory=RiskAssessmentOut)
+    onchain: OnchainActivityOut
     data_gaps: list[str] = Field(default_factory=list)
     as_of: str
     sources: list[str] = Field(default_factory=list)
@@ -146,13 +177,60 @@ class DashboardStats(BaseModel):
 
 class DashboardResponse(BaseModel):
     """Everything the dashboard needs, sourced from the DB (latest snapshot
-    per protocol + alert_records) with a live DefiLlama hydration fallback."""
+    per protocol + alert_records) with a live DefiLlama hydration fallback.
+
+    ``withheld_alerts`` is the number of critical alerts the caller's clearance
+    was not sufficient to read. It is reported rather than hidden: a board that
+    silently shows three fewer alerts than exist would be lying by omission."""
 
     stats: DashboardStats
     protocols: list[ProtocolOverview] = Field(default_factory=list)
     alerts: list[Alert] = Field(default_factory=list)
     aggregate_history: list[TvlPoint] = Field(default_factory=list)
     as_of: str | None = None
+    withheld_alerts: int = 0
+
+
+class SubjectOut(BaseModel):
+    """The authenticated caller, as the UI needs it.
+
+    ``categories`` / ``chains`` come back as ``["*"]`` when the axis is
+    unrestricted, and ``permissions`` is the resolved RBAC verb list so the
+    client can disable a control instead of discovering the 403 the hard way."""
+
+    user_id: str
+    email: str
+    role: str
+    team: str | None = None
+    clearance: int = 1
+    categories: list[str] = Field(default_factory=list)
+    chains: list[str] = Field(default_factory=list)
+    authenticated: bool = True
+    permissions: list[str] = Field(default_factory=list)
+
+
+class LoginRequest(BaseModel):
+    email: str = Field(..., min_length=3, max_length=254)
+    password: str = Field(..., min_length=1, max_length=256)
+
+
+class SwitchRequest(BaseModel):
+    """Demo-mode role switch: re-issue a session for another seeded account."""
+
+    email: str = Field(..., min_length=3, max_length=254)
+
+
+class LoginResponse(BaseModel):
+    token: str
+    subject: SubjectOut
+    expires_at: str
+
+
+class TicketResponse(BaseModel):
+    """Single-use credential for the browser-opened ``WS /ws/chat`` socket."""
+
+    ticket: str
+    expires_in: int
 
 
 class ChatRequest(BaseModel):

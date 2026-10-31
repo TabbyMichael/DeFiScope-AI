@@ -3,6 +3,8 @@
 import time
 
 from app.clients.defillama import ProtocolDetail, ProtocolSummary
+from app.config import get_settings
+from app.db import SessionLocal
 from app.services import alerts
 from app.services.protocols import ResearchPack
 
@@ -157,3 +159,67 @@ class TestDepeg:
         # scorer surfaces it as an excluded data gap, not a low-risk pass).
         pack = make_pack([1000.0] * 40)
         assert [a for a in alerts.evaluate_pack(pack) if a.rule == "depeg"] == []
+
+
+class StubService:
+    """The two methods run_monitor needs, without any DefiLlama traffic."""
+
+    def __init__(self, slugs: list[str], packs: list | None = None) -> None:
+        self.slugs = slugs
+        self.packs = packs or []
+        self.settings = get_settings()
+
+    async def watchlist_slugs(self, http):
+        return self.slugs
+
+    async def get_packs(self, slugs, http=None, session=None):
+        return self.packs
+
+
+class TestRunMonitorOnchainWiring:
+    """The second provider is fetched inside the pass, and only there."""
+
+    async def test_refresh_receives_the_discovered_watchlist(self, monkeypatch):
+        seen: dict = {}
+
+        async def fake_refresh(session, http, slugs, settings=None, client=None):
+            seen["slugs"] = slugs
+
+        monkeypatch.setattr(alerts.onchain, "refresh", fake_refresh)
+        db = SessionLocal()
+        try:
+            await alerts.run_monitor(StubService(["aave-v3", "lido"]), object(), db)
+        finally:
+            db.close()
+
+        # Discovery happens first, so on-chain work covers exactly the protocols
+        # that will be packed in this pass.
+        assert seen["slugs"] == ["aave-v3", "lido"]
+
+    async def test_a_dune_outage_does_not_fail_the_pass(self, monkeypatch):
+        async def exploding_refresh(*args, **kwargs):
+            raise RuntimeError("dune is down")
+
+        monkeypatch.setattr(alerts.onchain, "refresh", exploding_refresh)
+        db = SessionLocal()
+        try:
+            assert await alerts.run_monitor(StubService(["aave-v3"]), object(), db) == []
+        finally:
+            db.close()
+
+    async def test_disabled_onchain_builds_no_client(self, monkeypatch):
+        class Boom:
+            def __init__(self, *args, **kwargs):  # pragma: no cover - asserted
+                raise AssertionError("no Dune client may be built when disabled")
+
+        monkeypatch.setattr(alerts.onchain, "DuneClient", Boom)
+
+        settings = get_settings()
+        previous = settings.onchain_data_enabled
+        settings.onchain_data_enabled = False
+        db = SessionLocal()
+        try:
+            await alerts.run_monitor(StubService(["aave-v3"]), object(), db)
+        finally:
+            db.close()
+            settings.onchain_data_enabled = previous

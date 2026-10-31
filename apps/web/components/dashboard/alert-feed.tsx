@@ -1,4 +1,5 @@
 import AlertItem from "@/components/dashboard/alert-item";
+import WithheldBanner from "@/components/dashboard/withheld-banner";
 import {
   Card,
   CardContent,
@@ -10,9 +11,12 @@ import type { Alert } from "@/lib/types";
 
 export default function AlertFeed({
   alerts,
+  withheld = 0,
   limit = 8,
 }: {
   alerts: Alert[];
+  /** Rows the API withheld above the caller's clearance: counted, not shown. */
+  withheld?: number;
   limit?: number;
 }) {
   const shown = alerts.slice(0, limit);
@@ -24,9 +28,10 @@ export default function AlertFeed({
         <CardTitle>Alert feed</CardTitle>
       </CardHeader>
       <CardContent className="space-y-2">
+        <WithheldBanner withheld={withheld} />
         {shown.length === 0 && (
           <p className="text-sm text-muted-foreground">
-            No rules triggered. Quiet is not the same as safe — rules only fire on
+            No rules triggered. Quiet is not the same as safe. Rules only fire on
             TVL-observable signals.
           </p>
         )}

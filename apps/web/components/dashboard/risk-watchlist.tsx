@@ -9,7 +9,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { fmtPct, fmtUsd } from "@/lib/api";
+import { fmtPct, fmtUsd } from "@/lib/api-config";
 import type { ProtocolOverview } from "@/lib/types";
 
 export default function RiskWatchlist({

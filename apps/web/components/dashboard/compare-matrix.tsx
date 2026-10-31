@@ -11,13 +11,13 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { fmtPct, fmtUsd } from "@/lib/api";
+import { fmtPct, fmtUsd } from "@/lib/api-config";
 import { bestIndexOf, type CompareItem } from "@/lib/compare";
 import { cn } from "@/lib/utils";
 
-/** Format a 0..1 fraction as a percent string; null → em dash. */
+/** Format a 0..1 fraction as a percent string; null reads n/a. */
 function fmtFraction(v: number | null | undefined, digits = 1): string {
-  if (v == null) return "—";
+  if (v == null) return "n/a";
   return `${(v * 100).toFixed(digits)}%`;
 }
 
@@ -28,8 +28,8 @@ function toneFor(value: number | null | undefined): "up" | "down" | "flat" {
 
 /**
  * A single metric row. Values are rendered per column; the best index (from
- * `bestIndexOf`) gets a subtle accent background. `null` values render as an em
- * dash — never silently zeroed — preserving honesty about missing data.
+ * `bestIndexOf`) gets a subtle accent background. `null` values render as n/a
+ * and are never silently zeroed, preserving honesty about missing data.
  */
 function MetricRow({
   label,
@@ -90,8 +90,8 @@ export default function CompareMatrix({ items }: { items: CompareItem[] }) {
         <CardHeader>
           <CardDescription>
             The best value in each row is tinted green (highest TVL/change, lowest
-            risk, volatility, concentration and staleness). Em dashes mean the
-            metric was not available — never assumed safe.
+            risk, volatility, concentration and staleness). An n/a means the
+            metric was not available, never assumed safe.
           </CardDescription>
           <CardTitle>Side-by-side metrics</CardTitle>
         </CardHeader>
@@ -137,7 +137,7 @@ export default function CompareMatrix({ items }: { items: CompareItem[] }) {
                 <MetricRow
                   label="Category"
                   items={items}
-                  render={(it) => o(it)?.category ?? "—"}
+                  render={(it) => o(it)?.category ?? "n/a"}
                 />
                 <MetricRow
                   label="TVL"
@@ -197,7 +197,7 @@ export default function CompareMatrix({ items }: { items: CompareItem[] }) {
                   items={items}
                   render={(it) => {
                     const ov = o(it);
-                    if (!ov?.top_chain) return "—";
+                    if (!ov?.top_chain) return "n/a";
                     return (
                       <span>
                         {ov.top_chain}{" "}
@@ -227,7 +227,7 @@ export default function CompareMatrix({ items }: { items: CompareItem[] }) {
                     <span className="tabular-nums">
                       {o(it)?.incentive_ratio != null
                         ? o(it)!.incentive_ratio!.toFixed(2)
-                        : "—"}
+                        : "n/a"}
                     </span>
                   )}
                 />
@@ -265,12 +265,12 @@ export default function CompareMatrix({ items }: { items: CompareItem[] }) {
                 />
                 <MetricRow
                   label="Peg deviation (30d)"
-                  hint="lower = closer to peg; — = no tracked stablecoin"
+                  hint="lower = closer to peg; n/a = no tracked stablecoin"
                   items={items}
                   best={depegIdx}
                   render={(it) => {
                     const v = o(it)?.depeg_worst_bps;
-                    if (v == null) return "—";
+                    if (v == null) return "n/a";
                     const asset = o(it)?.depeg_asset;
                     return (
                       <span className="tabular-nums">
@@ -292,7 +292,7 @@ export default function CompareMatrix({ items }: { items: CompareItem[] }) {
                   best={riskIdx}
                   render={(it) => {
                     const ov = o(it);
-                    if (!ov) return "—";
+                    if (!ov) return "n/a";
                     return (
                       <RiskBadge score={ov.risk_score} band={ov.risk_band} />
                     );
@@ -305,7 +305,7 @@ export default function CompareMatrix({ items }: { items: CompareItem[] }) {
                   best={staleIdx}
                   render={(it) => {
                     const days = o(it)?.stale_days;
-                    if (days == null) return "—";
+                    if (days == null) return "n/a";
                     return (
                       <span
                         className={cn(
@@ -328,7 +328,7 @@ export default function CompareMatrix({ items }: { items: CompareItem[] }) {
                         tone={toneFor(o(it)?.change_30d)}
                       />
                     ) : (
-                      "—"
+                      "n/a"
                     )
                   }
                 />
@@ -337,7 +337,7 @@ export default function CompareMatrix({ items }: { items: CompareItem[] }) {
                   items={items}
                   render={(it) => (
                     <span className="text-xs text-muted-foreground">
-                      {it.data?.as_of ?? "—"}
+                      {it.data?.as_of ?? "n/a"}
                     </span>
                   )}
                 />
@@ -353,7 +353,7 @@ export default function CompareMatrix({ items }: { items: CompareItem[] }) {
         </CardContent>
       </Card>
 
-      {/* Explainable risk breakdown — the honesty DNA, per protocol. */}
+      {/* Explainable risk breakdown, the honesty DNA, per protocol. */}
       <div className="grid gap-4 lg:grid-cols-2">
         {items
           .filter((it) => it.data)
@@ -400,7 +400,7 @@ function RiskDetail({ item }: { item: CompareItem }) {
                 <div className="flex items-center justify-between gap-2">
                   <span className="text-sm font-medium">{ind.label}</span>
                   <span className="text-xs tabular-nums text-muted-foreground">
-                    score {ind.score == null ? "—" : ind.score.toFixed(0)} · weight{" "}
+                    score {ind.score == null ? "n/a" : ind.score.toFixed(0)} · weight{" "}
                     {(ind.weight * 100).toFixed(0)}%
                   </span>
                 </div>
