@@ -29,7 +29,7 @@ async function CompareContent({
       category: p.category ?? null,
     }));
   } catch {
-    options = []; // directory unavailable — picker degrades to empty, page still renders
+    options = []; // directory unavailable, so the picker degrades to empty and the page still renders
   }
 
   // Resolve each selected slug to a column; a failing slug becomes "unavailable".
@@ -49,8 +49,8 @@ async function CompareContent({
       <div className="space-y-3 rounded-lg border bg-card p-4">
         <div className="flex items-center justify-between gap-3">
           <p className="text-sm text-muted-foreground">
-            Pick 2–{MAX_COMPARE} protocols to compare. The selection lives in the
-            URL, so any view is shareable.
+            Pick 2 to {MAX_COMPARE} protocols to compare. The selection lives in
+            the URL, so any view is shareable.
           </p>
           <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
             {slugs.length}/{MAX_COMPARE}
@@ -59,7 +59,7 @@ async function CompareContent({
         <ComparePicker options={options} />
         {truncated && (
           <p className="text-xs text-yellow-700 dark:text-yellow-400">
-            Only the first {MAX_COMPARE} protocols are compared — extra slugs in
+            Only the first {MAX_COMPARE} protocols are compared. Extra slugs in
             the URL were ignored.
           </p>
         )}
@@ -82,8 +82,8 @@ async function CompareContent({
             Nothing to compare yet
           </p>
           <p className="max-w-sm text-xs leading-relaxed text-muted-foreground">
-            Search above and select at least two protocols — for example Aave v3
-            vs. Uniswap v3 — to see their metrics and risk side by side.
+            Search above and select at least two protocols, for example Aave v3
+            and Uniswap v3, to see their metrics and risk side by side.
           </p>
         </div>
       ) : slugs.length === 1 ? (
@@ -120,7 +120,7 @@ export default function ComparePage({
           </h1>
           <p className="mt-1 text-sm text-muted-foreground">
             Side-by-side TVL trends and explainable risk for up to {MAX_COMPARE}{" "}
-            protocols. Scores reflect what TVL data can show — gaps are surfaced,
+            protocols. Scores reflect what TVL data can show. Gaps are surfaced,
             not hidden.
           </p>
         </div>

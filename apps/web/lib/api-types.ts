@@ -18,6 +18,10 @@ export interface paths {
          *     This is a fast DB read - it does NOT trigger a crawl. The scheduler and
          *     ``POST /api/alerts/run`` are the owners of the (expensive) DefiLlama
          *     monitoring pass that populates these rows.
+         *
+         *     Critical alerts above the caller's clearance are withheld from the body and
+         *     counted in ``X-Withheld-Alerts``: the reader still learns that something
+         *     broke, without learning what.
          */
         get: operations["current_alerts_api_alerts_get"];
         put?: never;
@@ -56,11 +60,118 @@ export interface paths {
         put?: never;
         /**
          * Run Alert Check
-         * @description Manual/admin trigger for a full monitoring pass: crawl the watchlist,
+         * @description Manual trigger for a full monitoring pass: crawl the watchlist,
          *     evaluate rules, persist alerts + daily snapshots, then return the alerts
          *     that fired on this pass (the same set ``GET /api/alerts`` will now serve).
+         *
+         *     Gated twice beyond the role: a pass outside business hours is refused, and a
+         *     pass over a *fresh* snapshot is refused as redundant - a crawl that cannot
+         *     change anything is wasted upstream quota, not diligence. Both denials come
+         *     back as an explanation rather than a bare 403.
          */
         post: operations["run_alert_check_api_alerts_run_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/auth/login": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Login */
+        post: operations["login_api_auth_login_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/auth/logout": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Logout
+         * @description Delete the session row. Idempotent: an already-dead token is not an error,
+         *     because the caller's intent (be logged out) is satisfied either way.
+         */
+        post: operations["logout_api_auth_logout_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/auth/me": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Me */
+        get: operations["me_api_auth_me_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/auth/switch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Switch
+         * @description Demo only: become another seeded account without typing a password.
+         *
+         *     Disabled in ``required`` mode - impersonation is a tour affordance, not a
+         *     feature of a real deployment. The caller's previous session is revoked so
+         *     the switch is an identity transition rather than a second live credential.
+         */
+        post: operations["switch_api_auth_switch_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/auth/ticket": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Ws Ticket
+         * @description Mint a single-use, short-lived credential for the browser's WebSocket.
+         *
+         *     Gated on ``chat:ask`` so the ticket can never out-rank the verb that
+         *     matters: a role that cannot ask questions cannot get a socket either.
+         */
+        post: operations["ws_ticket_api_auth_ticket_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -99,6 +210,12 @@ export interface paths {
          *     browser saves the file. Unknown formats are a 400; an unfetchable protocol
          *     is a 404 (mirrors the JSON brief endpoint). The web app proxies this through
          *     a same-origin route handler so the compose-internal API URL stays server-side.
+         *
+         *     The confidence gate is evaluated after the brief is composed because
+         *     confidence is a property of the brief itself - there is no cheaper way to
+         *     know it in advance. A denied export therefore costs the same generation as
+         *     an allowed one; the cost ceiling for that lives in the deferred
+         *     per-subject rate limiting, not here.
          */
         get: operations["export_brief_api_briefs__slug__export_get"];
         put?: never;
@@ -343,6 +460,10 @@ export interface components {
          * DashboardResponse
          * @description Everything the dashboard needs, sourced from the DB (latest snapshot
          *     per protocol + alert_records) with a live DefiLlama hydration fallback.
+         *
+         *     ``withheld_alerts`` is the number of critical alerts the caller's clearance
+         *     was not sufficient to read. It is reported rather than hidden: a board that
+         *     silently shows three fewer alerts than exist would be lying by omission.
          */
         DashboardResponse: {
             /** Aggregate History */
@@ -354,6 +475,11 @@ export interface components {
             /** Protocols */
             protocols?: components["schemas"]["ProtocolOverview"][];
             stats: components["schemas"]["DashboardStats"];
+            /**
+             * Withheld Alerts
+             * @default 0
+             */
+            withheld_alerts: number;
         };
         /** DashboardStats */
         DashboardStats: {
@@ -389,6 +515,21 @@ export interface components {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
         };
+        /** LoginRequest */
+        LoginRequest: {
+            /** Email */
+            email: string;
+            /** Password */
+            password: string;
+        };
+        /** LoginResponse */
+        LoginResponse: {
+            /** Expires At */
+            expires_at: string;
+            subject: components["schemas"]["SubjectOut"];
+            /** Token */
+            token: string;
+        };
         /**
          * Mover
          * @description A protocol ranked by 7d TVL change (used for top gainers/losers).
@@ -400,6 +541,50 @@ export interface components {
             name: string;
             /** Slug */
             slug: string;
+        };
+        /**
+         * OnchainActivityOut
+         * @description On-chain activity from Dune - the second, additive data provider.
+         *
+         *     Always present on a research payload, because *why* there is no number is
+         *     part of the answer: ``unconfigured`` (no key), ``no_data`` (no curated
+         *     mapping or nothing captured yet), ``stale``, ``partial`` (a mapped chain
+         *     did not report) or ``ok``. An omitted block could not tell those apart, and
+         *     a zero would assert "no activity" - a claim these measurements never make.
+         *
+         *     ``source`` is per block rather than per protocol: this block is Dune's,
+         *     while ``ProtocolOverview.source`` stays DefiLlama's.
+         */
+        OnchainActivityOut: {
+            /** Active Wallets */
+            active_wallets?: number | null;
+            /** As Of */
+            as_of?: string | null;
+            /** Chains */
+            chains?: string[];
+            /** Missing Chains */
+            missing_chains?: string[];
+            /** Note */
+            note?: string | null;
+            /** Returning Wallet Share */
+            returning_wallet_share?: number | null;
+            /** Returning Wallets */
+            returning_wallets?: number | null;
+            /**
+             * Source
+             * @default dune
+             * @constant
+             */
+            source: "dune";
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "ok" | "partial" | "stale" | "no_data" | "unconfigured";
+            /** Tx Count */
+            tx_count?: number | null;
+            /** Tx Volume Usd */
+            tx_volume_usd?: number | null;
         };
         /** ProtocolOverview */
         ProtocolOverview: {
@@ -470,6 +655,7 @@ export interface components {
             data_gaps?: string[];
             /** Name */
             name: string;
+            onchain: components["schemas"]["OnchainActivityOut"];
             overview: components["schemas"]["ProtocolOverview"];
             risk?: components["schemas"]["RiskAssessmentOut"];
             /** Slug */
@@ -553,6 +739,58 @@ export interface components {
             date: string;
             /** Score */
             score?: number | null;
+        };
+        /**
+         * SubjectOut
+         * @description The authenticated caller, as the UI needs it.
+         *
+         *     ``categories`` / ``chains`` come back as ``["*"]`` when the axis is
+         *     unrestricted, and ``permissions`` is the resolved RBAC verb list so the
+         *     client can disable a control instead of discovering the 403 the hard way.
+         */
+        SubjectOut: {
+            /**
+             * Authenticated
+             * @default true
+             */
+            authenticated: boolean;
+            /** Categories */
+            categories?: string[];
+            /** Chains */
+            chains?: string[];
+            /**
+             * Clearance
+             * @default 1
+             */
+            clearance: number;
+            /** Email */
+            email: string;
+            /** Permissions */
+            permissions?: string[];
+            /** Role */
+            role: string;
+            /** Team */
+            team?: string | null;
+            /** User Id */
+            user_id: string;
+        };
+        /**
+         * SwitchRequest
+         * @description Demo-mode role switch: re-issue a session for another seeded account.
+         */
+        SwitchRequest: {
+            /** Email */
+            email: string;
+        };
+        /**
+         * TicketResponse
+         * @description Single-use credential for the browser-opened ``WS /ws/chat`` socket.
+         */
+        TicketResponse: {
+            /** Expires In */
+            expires_in: number;
+            /** Ticket */
+            ticket: string;
         };
         /** TvlPoint */
         TvlPoint: {
@@ -661,6 +899,132 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Alert"][];
+                };
+            };
+        };
+    };
+    login_api_auth_login_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LoginRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LoginResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    logout_api_auth_logout_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    me_api_auth_me_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SubjectOut"];
+                };
+            };
+        };
+    };
+    switch_api_auth_switch_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SwitchRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LoginResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    ws_ticket_api_auth_ticket_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TicketResponse"];
                 };
             };
         };

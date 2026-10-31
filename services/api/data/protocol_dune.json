@@ -1,0 +1,68 @@
+{
+  "_comment": [
+    "slug -> {query chain -> [core contract addresses]}. Read by",
+    "app/reference_data.load_dune_mapping() and passed to the saved Dune query as",
+    "the {{addresses}} parameter. The chain key is the Dune table namespace the",
+    "query reads (ethereum.transactions, arbitrum.transactions, ...), NOT",
+    "DefiLlama's TVL attribution: a protocol can hold TVL on ten chains while its",
+    "contracts are deployed on two.",
+    "",
+    "Curated by hand on purpose. A wrong address does not fail loudly - it returns",
+    "clean-looking, wrong numbers - so the rule is: include only widely-published",
+    "core deployment contracts (the singleton or proxy that carries the protocol's",
+    "flow), and OMIT anything that could not be confirmed rather than guess. An",
+    "omitted slug reports 'no_data' on the research page, which is honest; a wrong",
+    "one would not be. See _omitted below for the protocols left out and why.",
+    "",
+    "Activity counted here is contract-level: a router or wrapper inflates",
+    "tx_count without meaning more users."
+  ],
+  "_note_scaling": "Add chains/protocols here as they are verified; no code change is needed and the loader skips keys beginning with '_'.",
+  "_omitted": {
+    "curve-dex": "Activity lives in dozens of individually deployed pools, not one contract. A single address would misrepresent the protocol.",
+    "jupiter": "Solana-native (non-EVM), so the EVM transactions tables this query reads do not apply.",
+    "pendle": "Core router address not confirmed in this session.",
+    "fluid": "Core liquidity contract address not confirmed in this session.",
+    "makerdao": "Flow concentrates in the Vat and a rotating set of ilk joins; not confirmed precisely enough to publish.",
+    "sky": "Same governance/MCD surface as makerdao."
+  },
+  "aave-v3": {
+    "ethereum": ["0x87870Bca3F3fD6335C3F4ce8392D69350B4fA4E2"]
+  },
+  "uniswap-v3": {
+    "ethereum": [
+      "0x1F98431c8aD98523631AE4a59f267346ea31F984",
+      "0xC36442b4a4522E871399CD717aBDD847Ab11FE88"
+    ]
+  },
+  "lido": {
+    "ethereum": [
+      "0xae7ab96520DE3A18E5e111B5EaAb095312D7fE84",
+      "0x7f39C581F595B53c5cb19bD0b3f8dA6c935E2Ca0"
+    ]
+  },
+  "balancer": {
+    "ethereum": ["0xBA12222222228d8Ba445958a75a0704d566BF2C8"]
+  },
+  "morpho": {
+    "ethereum": ["0xBBBBBbbBBb9cC5e90e3b3Af64bdAF62C37EEFFCb"]
+  },
+  "compound-v3": {
+    "ethereum": [
+      "0xc3d688B66703497DAA19211EEdff47f25384cdc3",
+      "0xA17581A9E3356d9A858b789D68B4d866e593aE94"
+    ]
+  },
+  "ether.fi": {
+    "ethereum": ["0x35fA164735182de50811E8e2E824cFb9B6118ac2"]
+  },
+  "rocket-pool": {
+    "ethereum": ["0x1d8f8f00cfa6758d7bE78336684788Fb0ee0Fa46"]
+  },
+  "sushi": {
+    "ethereum": ["0xd9e1cE17f2641f24aE83637ab66a2cca9C378B9F"]
+  },
+  "pancakeswap": {
+    "bsc": ["0x10ED43C718714eb63d5aA57B78B54704E256024E"]
+  }
+}

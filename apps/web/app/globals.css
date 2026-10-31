@@ -132,3 +132,133 @@ body {
     @apply font-sans;
   }
 }
+
+/* ============================================================================
+   Auth entrance — the landing page's choreography, one step quieter
+   ----------------------------------------------------------------------------
+   `/login` is a server component, so the stagger is expressed as plain classes
+   plus an inline `animation-delay` per element instead of a JS animation
+   library: no hydration cost, no frame loop, and the first HTML paint is
+   already the final layout. Everything is `both`, so a delayed element holds
+   its opening frame (invisible) rather than flashing before it moves.
+
+   Kept in the global sheet rather than the page because the utilities are used
+   by two files (the page shell and the login form) and `*.css` in this app
+   cannot be a CSS module — see the header of `app/welcome/landing.css`.
+   ========================================================================== */
+
+@keyframes auth-rise {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 16px, 0);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes auth-mask {
+  from {
+    transform: translate3d(0, 118%, 0);
+  }
+  to {
+    transform: none;
+  }
+}
+
+/* The two emerald blooms, on a long uneven cycle so they never visibly loop. */
+@keyframes auth-drift {
+  0%,
+  100% {
+    transform: translate3d(-3%, -2%, 0) scale(1);
+  }
+  50% {
+    transform: translate3d(3%, 4%, 0) scale(1.08);
+  }
+}
+
+/* A rejected password is the one moment that should feel like an answer. */
+@keyframes auth-shake {
+  0%,
+  100% {
+    transform: none;
+  }
+  20% {
+    transform: translateX(-4px);
+  }
+  40% {
+    transform: translateX(4px);
+  }
+  60% {
+    transform: translateX(-2px);
+  }
+  80% {
+    transform: translateX(2px);
+  }
+}
+
+.auth-rise {
+  animation: auth-rise 0.72s cubic-bezier(0.16, 0.84, 0.24, 1) both;
+}
+
+/* One line of text revealed by its own clip box — the landing hero's trick,
+   scaled down to a wordmark and a card title. The inner span travels; the
+   outer one is the mask. */
+.auth-mask {
+  display: block;
+  overflow: hidden;
+}
+.auth-mask > span {
+  display: block;
+  animation: auth-mask 0.9s cubic-bezier(0.16, 0.84, 0.24, 1) both;
+}
+
+.auth-drift {
+  animation: auth-drift 26s ease-in-out infinite;
+  will-change: transform;
+}
+.auth-drift-slow {
+  animation-duration: 34s;
+  animation-direction: reverse;
+}
+
+.auth-error {
+  animation: auth-shake 0.42s cubic-bezier(0.36, 0.07, 0.19, 0.97) both;
+}
+
+/* A faint blueprint behind the card. Drawn in the foreground colour so it
+   resolves in both themes, then masked to an ellipse so the edges of the
+   viewport never show the grid ending. */
+.auth-grid {
+  background-image:
+    linear-gradient(
+      to right,
+      color-mix(in oklab, var(--foreground) 9%, transparent) 1px,
+      transparent 1px
+    ),
+    linear-gradient(
+      to bottom,
+      color-mix(in oklab, var(--foreground) 9%, transparent) 1px,
+      transparent 1px
+    );
+  background-size: 56px 56px;
+  background-position: center;
+  -webkit-mask-image: radial-gradient(
+    66% 56% at 50% 36%,
+    #000 0%,
+    transparent 78%
+  );
+  mask-image: radial-gradient(66% 56% at 50% 36%, #000 0%, transparent 78%);
+}
+
+/* The whole entrance is optional. Without it every element is already at its
+   final position, because the keyframes only ever describe the way in. */
+@media (prefers-reduced-motion: reduce) {
+  .auth-rise,
+  .auth-mask > span,
+  .auth-drift,
+  .auth-error {
+    animation: none;
+  }
+}

@@ -99,24 +99,41 @@ class RagService:
 
     # -- retrieval -----------------------------------------------------------
 
-    def _pool(self, protocol_slug: str | None) -> list[Chunk]:
+    def _pool(
+        self, protocol_slug: str | None, visible_slugs: set[str] | None = None
+    ) -> list[Chunk]:
         if protocol_slug:
             # Protocol-scoped: its own evidence plus the shared methodology docs.
-            return [
+            pool = [
                 c
                 for c in self._chunks.values()
                 if c.protocol_slug == protocol_slug or c.source_type == "doc"
             ]
-        return list(self._chunks.values())
+        else:
+            pool = list(self._chunks.values())
+        if visible_slugs is not None:
+            # Retrieval obeys the same data scope as the board. A subject limited
+            # to two categories must not receive a quote - or a citation proving
+            # existence - from a protocol they cannot open, so out-of-scope
+            # evidence is removed from the pool *before* ranking rather than
+            # filtered out afterwards (a removed passage cannot leak through a
+            # citation number or a model paraphrase).
+            pool = [c for c in pool if c.protocol_slug is None or c.protocol_slug in visible_slugs]
+        return pool
 
     async def retrieve(
-        self, query: str, http: httpx.AsyncClient, *, protocol_slug: str | None = None
+        self,
+        query: str,
+        http: httpx.AsyncClient,
+        *,
+        protocol_slug: str | None = None,
+        visible_slugs: set[str] | None = None,
     ) -> tuple[list[tuple[Chunk, float]], bool]:
         """Return the top chunks with scores, and whether they came from the
         vector path. The flag matters because cosine (``[0, 1]``) and BM25
         (unbounded) scores aren't comparable, so the relevance gate differs."""
         settings = get_settings()
-        pool = self._pool(protocol_slug)
+        pool = self._pool(protocol_slug, visible_slugs)
         if not pool:
             return [], False
 
@@ -199,10 +216,17 @@ class RagService:
         )
 
     async def answer(
-        self, question: str, http: httpx.AsyncClient, *, protocol_slug: str | None = None
+        self,
+        question: str,
+        http: httpx.AsyncClient,
+        *,
+        protocol_slug: str | None = None,
+        visible_slugs: set[str] | None = None,
     ) -> ChatAnswer:
         settings = get_settings()
-        scored, used_vectors = await self.retrieve(question, http, protocol_slug=protocol_slug)
+        scored, used_vectors = await self.retrieve(
+            question, http, protocol_slug=protocol_slug, visible_slugs=visible_slugs
+        )
         supporting = self._supporting(question, scored, used_vectors)
         if not supporting:
             return self._refusal(protocol_slug)
@@ -234,14 +258,21 @@ class RagService:
         )
 
     async def answer_stream(
-        self, question: str, http: httpx.AsyncClient, *, protocol_slug: str | None = None
+        self,
+        question: str,
+        http: httpx.AsyncClient,
+        *,
+        protocol_slug: str | None = None,
+        visible_slugs: set[str] | None = None,
     ) -> AsyncIterator[dict]:
         """Yield WS frames: ``token`` deltas, then ``citations``, then ``done``.
 
         Frames are plain dicts the router serializes - keeping the transport
         concerns (socket, pings, closes) out of the reasoning core."""
         settings = get_settings()
-        scored, used_vectors = await self.retrieve(question, http, protocol_slug=protocol_slug)
+        scored, used_vectors = await self.retrieve(
+            question, http, protocol_slug=protocol_slug, visible_slugs=visible_slugs
+        )
         supporting = self._supporting(question, scored, used_vectors)
         if not supporting:
             refusal = self._refusal(protocol_slug)

@@ -14,6 +14,7 @@ It is the contract between the dashboard and the analyst.
 | [DefiLlama coin prices](https://coins.llama.fi) (`/chart/{coins}`) | Historical USD prices of a protocol's minted stablecoins → peg deviation | Only coins with a tracked price feed resolve; a mapped coin without history is a data gap. Confidence-weighted, so brief intraday excursions can register. |
 | Curated stablecoin map (`data/protocol_stablecoins.json`) | Which USD-pegged coin(s) each protocol mints/backs | Hand-curated and deliberately narrow; a protocol minting a coin outside the map is reported as "not assessed", never risk-free. |
 | Curated security notes (`app/analysis/scoring.py::KNOWN_SECURITY_NOTES`) | Historical incidents (e.g. Curve's Aug 2023 Vyper exploit) | Intentionally minimal; a research prompt, not an incident database. |
+| [Dune Analytics](https://dune.com) (`/query/{id}/execute` → `/execution/{id}/results`) | Contract-level activity: daily active wallets, transaction count, transfer volume, returning wallets | Counts *contract* activity, not users — a router or wrapper contract inflates counts. Transfer volume counts inbound legs only. Coverage comes from a hand-curated slug → contract map, so a protocol outside it is a data gap. Only runs when a key **and** a saved-query id are configured; otherwise the block reads `unconfigured`. |
 
 All outputs carry an `as_of` date (timestamp of the latest underlying observation)
 and source links. The API refuses to silently present stale data: freshness is a
@@ -110,6 +111,68 @@ automatically when data gaps exist.
 
 Alert IDs are deterministic per protocol/rule/day, so re-runs are idempotent.
 Every alert embeds its triggering evidence: metric, observed value, threshold.
+
+## On-chain activity: evidence, not indicator
+
+TVL is a stock, and fee adapters disagree about what they count. Neither answers
+"how many addresses actually touched this protocol today". That is measured
+directly from raw chain data (Dune) and shown on the protocol page — additively,
+alongside the DefiLlama numbers rather than replacing any of them.
+
+All four metrics are defined **per tracked contract set, per UTC day**, over the
+protocol's curated addresses (`services/api/data/protocol_dune.json`). Only
+complete UTC days are counted, so today's partial activity never reads as a
+collapse:
+
+| Field | Definition |
+|---|---|
+| `active_wallets` | Distinct `tx."from"` that sent at least one successful transaction to a tracked contract that day |
+| `tx_count` | Count of successful transactions to tracked contracts |
+| `tx_volume_usd` | Σ `amount_usd` of token transfers whose recipient is a tracked contract |
+| `returning_wallets` | Of day-*D*'s active wallets, those also active in the 30 days before *D* |
+| `returning_wallet_share` | `returning_wallets / active_wallets`; `null` when there are no active wallets — never `0.0` |
+
+### What these can and cannot establish
+
+- **Contract activity, not users.** One address can be a person, a bot, or a
+  bundler. A router or wrapper contract inflates `tx_count` without meaning
+  anything about demand. Read them as *load on the protocol's contracts*.
+- **Inflows only.** `tx_volume_usd` sums transfers **into** tracked contracts, so
+  the two legs of a swap are not both counted. It is not "volume" in the DEX
+  sense and must not be compared to `volume_1d` from DefiLlama.
+- **Mapping-bound.** A wrong or stale contract address produces clean-looking,
+  wrong numbers. That is why the map is hand-curated, reviewed, and deliberately
+  *incomplete*: protocols whose deployment addresses could not be verified are
+  omitted (and read `no_data`) rather than guessed.
+- **A gap is not a zero.** Missing key, missing mapping, missing chain and stale
+  rows are four distinct statuses (`unconfigured`, `no_data`, `partial`, `stale`)
+  and all of them render as an em dash plus a reason. Nothing in this block can
+  silently become `0`.
+
+### Why the seven risk indicators do not read these numbers
+
+On-chain activity is **evidence** in exactly the sense this document uses
+elsewhere: it belongs next to a number in a brief, and the chat may quote it, but
+it does not move the composite score. The reason is not modesty about the metric
+— it is that a risk weight needs a calibration story, and there isn't one yet.
+No replay over a resolved failure shows that falling activity would have flagged
+the failure earlier than TVL already did. Adding a weight now would contribute
+noise and a false sense of coverage.
+
+The bar for ever changing that is deliberately high; all three conditions must
+hold:
+
+1. **≥ 6 months of continuous history** across the tracked protocols, spanning at
+   least one genuine stress event.
+2. **A written hypothesis** naming the mechanism ("activity collapses before TVL,
+   because debt is repaid before liquidity is withdrawn"), the direction, and the
+   lead time it claims.
+3. **A backtest** showing the indicator adds signal *without* double-counting
+   volume or TVL — it must flag cases the existing seven miss, and not merely
+   re-flag the cases they already catch.
+
+Until all three hold, on-chain activity is displayed, cited and monitored — not
+scored.
 
 ## Chat / RAG (`app/rag/`)
 

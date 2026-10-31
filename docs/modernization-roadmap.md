@@ -18,19 +18,19 @@ delivery, a DB-first dashboard, an LLM-or-template research brief (exportable), 
 side-by-side comparison, and a grounded "ask the analyst" RAG chat.
 
 
-| Layer       | File(s)                                                      | What it does today                                                                                                                                     |
-| ----------- | ------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Data client | `services/api/app/clients/defillama.py`                      | Calls `/protocols`, `/protocol/{slug}` (TVL history, staking, borrowed, `currentChainTvls`, audit count), `fees.llama.fi/summary/fees` (fees+revenue), `/overview/dexs` (volume), `coins.llama.fi/chart` (peg prices). Retry/backoff honouring `Retry-After`; secondary fetches best-effort (fail → data gap). |
-| Metrics     | `services/api/app/analysis/metrics.py`                       | Pure primitives: volatility, drawdown, pct-change, chain HHI, incentive ratio, fees/volume-to-TVL, peg deviation (bps) + duration, freshness, price-normalized TVL (defined, not yet wired). |
-| Scoring     | `services/api/app/analysis/scoring.py`                       | 7 weighted indicators → composite 0-100 + band (renormalized over available). Each ships `evidence` + `limitation`; missing data → `data_gaps` (excluded, never "safe"). |
-| Alerts      | `services/api/app/services/alerts.py`                        | Rules: TVL drop/surge, daily shock, incentive dependence, stale data, depeg. DB-persisted, idempotent upsert; fan-out to notifiers with cooldown/dedup. `POST /api/alerts/run` + 30-min scheduler. |
-| Delivery    | `services/api/app/notifiers/`                                | console / webhook / slack / discord / telegram / email; each activates only when its env secret is set. Secrets never logged/persisted. |
-| Briefs      | `services/api/app/services/briefs.py`                        | Evidence-pack → OpenAI-compatible JSON; deterministic template fallback when no key. Same sections offline. |
-| Export      | `services/api/app/services/export.py`                        | Brief → Markdown / CSV (formula-injection-safe) / PDF (reportlab) via `GET /api/briefs/{slug}/export`. |
-| Chat (RAG)  | `services/api/app/rag/`, `routers/chat.py`                   | BM25 (offline) or cosine+pgvector retrieval over docs + per-protocol evidence; method-aware relevance gate; `llm`/`extractive`/`none` outcomes with numbered citations. `POST /api/chat` + `WS /ws/chat`. |
-| Dashboard   | `services/api/app/services/dashboard.py`                     | DB-first reads w/ live hydration fallback; sparklines, aggregate TVL, stats, movers, risk-score history. |
-| Contracts   | `services/api/app/schemas.py` → `apps/web/lib/api-types.ts` | OpenAPI-exported + codegen'd via `openapi-typescript`; CI drift-checks.                                                                                 |
-| Web         | `apps/web/app/(dashboard)/*`                                 | Next 16 RSC board, protocol detail (+ risk-trend chart), alerts + run-check/auto-refresh, `/ask` chat panel (WS streaming), `/compare` matrix, sort/filter table, TVL chart, dark/light. |
+| Layer       | File(s)                                                      | What it does today                                                                                                                                                                                                                                                                                             |
+| ----------- | ------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Data client | `services/api/app/clients/defillama.py`                      | Calls`/protocols`, `/protocol/{slug}` (TVL history, staking, borrowed, `currentChainTvls`, audit count), `fees.llama.fi/summary/fees` (fees+revenue), `/overview/dexs` (volume), `coins.llama.fi/chart` (peg prices). Retry/backoff honouring `Retry-After`; secondary fetches best-effort (fail → data gap). |
+| Metrics     | `services/api/app/analysis/metrics.py`                       | Pure primitives: volatility, drawdown, pct-change, chain HHI, incentive ratio, fees/volume-to-TVL, peg deviation (bps) + duration, freshness, price-normalized TVL (defined, not yet wired).                                                                                                                   |
+| Scoring     | `services/api/app/analysis/scoring.py`                       | 7 weighted indicators → composite 0-100 + band (renormalized over available). Each ships`evidence` + `limitation`; missing data → `data_gaps` (excluded, never "safe").                                                                                                                                      |
+| Alerts      | `services/api/app/services/alerts.py`                        | Rules: TVL drop/surge, daily shock, incentive dependence, stale data, depeg. DB-persisted, idempotent upsert; fan-out to notifiers with cooldown/dedup.`POST /api/alerts/run` + 30-min scheduler.                                                                                                              |
+| Delivery    | `services/api/app/notifiers/`                                | console / webhook / slack / discord / telegram / email; each activates only when its env secret is set. Secrets never logged/persisted.                                                                                                                                                                        |
+| Briefs      | `services/api/app/services/briefs.py`                        | Evidence-pack → OpenAI-compatible JSON; deterministic template fallback when no key. Same sections offline.                                                                                                                                                                                                   |
+| Export      | `services/api/app/services/export.py`                        | Brief → Markdown / CSV (formula-injection-safe) / PDF (reportlab) via`GET /api/briefs/{slug}/export`.                                                                                                                                                                                                         |
+| Chat (RAG)  | `services/api/app/rag/`, `routers/chat.py`                   | BM25 (offline) or cosine+pgvector retrieval over docs + per-protocol evidence; method-aware relevance gate;`llm`/`extractive`/`none` outcomes with numbered citations. `POST /api/chat` + `WS /ws/chat`.                                                                                                       |
+| Dashboard   | `services/api/app/services/dashboard.py`                     | DB-first reads w/ live hydration fallback; sparklines, aggregate TVL, stats, movers, risk-score history.                                                                                                                                                                                                       |
+| Contracts   | `services/api/app/schemas.py` → `apps/web/lib/api-types.ts` | OpenAPI-exported + codegen'd via`openapi-typescript`; CI drift-checks.                                                                                                                                                                                                                                         |
+| Web         | `apps/web/app/(dashboard)/*`                                 | Next 16 RSC board, protocol detail (+ risk-trend chart), alerts + run-check/auto-refresh,`/ask` chat panel (WS streaming), `/compare` matrix, sort/filter table, TVL chart, dark/light.                                                                                                                        |
 
 **The differentiator to protect:** intellectual honesty — every score shows
 evidence + limitation, gaps stay visible, and it works offline. New features must
@@ -76,7 +76,7 @@ Effort: S = small, M = medium, L = large. Impact: the same scale.
 | 11 | **Command-palette search (`cmdk`)**           | Med     | S      | —             | web                                       | Search the whole DefiLlama directory, not just the watchlist.        |
 | 12 | **Side-by-side comparison view**              | Med     | M      | —             | web,`routers`                             | Pick 2–3 protocols; the "Aave vs Uniswap" story.                    |
 | 13 | **URL-encoded shareable filters (`nuqs`)**    | Low-Med | S      | —             | web                                       | A sorted/filtered board becomes a shareable link.                    |
-| 14 | **User watchlists & annotations**             | Med     | L      | auth (Batch 0) | `db.py`, new `routers/watchlists.py`, web | Persist custom watchlists, notes, per-user thresholds (Postgres).    |
+| 14 | **User watchlists & annotations**             | Med     | L      | auth (shipped) | `db.py`, new `routers/watchlists.py`, web | Persist custom watchlists, notes, per-user thresholds (Postgres).    |
 | 15 | **Virtualized data grid (TanStack Table v8)** | Med     | M      | —             | web                                       | Render the full ~5000-protocol market, not 50 rows.                  |
 | 16 | **Sector / TVL-over-time market index view**  | Med     | M      | —             | web, dashboard                            | L2beat-style category breakdown + a "market health" index over time. |
 
@@ -85,7 +85,7 @@ Effort: S = small, M = medium, L = large. Impact: the same scale.
 
 | #  | Feature                                               | Impact          | Effort | Depends on | Files touched                     | Implementation notes                                                                                                                                                     |
 | -- | ----------------------------------------------------- | --------------- | ------ | ---------- | --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| 17 | **Auth + rate limiting (MUST-FIX)**                   | High (security) | M      | —         | `main.py`, `config.py`, `routers` | `POST /api/alerts/run` is an expensive admin-shaped crawl with **no auth**. Add API-key/OIDC (Auth.js/Clerk) to mutating + admin routes; add `slowapi`/edge rate limits. |
+| 17 | **Auth + rate limiting (auth shipped)**               | High (security) | M      | —         | `security/`, `routers/`, `proxy.ts` | Local accounts (scrypt), opaque sessions (SHA-256 at rest), RBAC verbs + ABAC predicates — data scope, alert clearance, brief confidence, crawl freshness and business hours — all enforced in FastAPI, plus single-use WS tickets. `proxy.ts` is UX only. **Still open:** `slowapi`/edge per-subject rate limits and LLM cost quotas. |
 | 18 | **Move off the in-process scheduler**                 | Med-High        | L      | —         | `main.py`, new worker             | APScheduler + in-process LRU can't scale horizontally. Push crawls + brief gen to a Redis-backed queue (arq/Celery); store raw payloads; add retention.                  |
 | 19 | **Observability (OTel /metrics / Sentry)**            | Med             | M      | —         | `main.py`, `config.py`            | OpenTelemetry traces, Prometheus`/metrics`, structured JSON logs, request IDs, Sentry. Builds on existing liveness/readiness probes.                                     |
 | 20 | **Caching layer (Redis + HTTP ETag)**                 | Med             | M      | #18        | `clients`, web proxy              | `ETag`/`Cache-Control`/`If-None-Match` on the Next→API boundary; cheaper vs. the 6h `STALE_AFTER` re-crawl.                                                             |
@@ -107,6 +107,7 @@ Effort: S = small, M = medium, L = large. Impact: the same scale.
 1. #1 Fees + volume — kills the most-repeated data gap; makes the risk score real.
 2. #3 Alert delivery + #2 depeg watch — turns a passive dashboard into an active monitoring product.
 3. #17 Auth + #18 async crawl — safe and scale-able enough to actually share.
+   Auth half shipped; #18 still open, so a manual pass still blocks the request.
 
 ---
 
@@ -130,7 +131,7 @@ Mark the items we should add, and any ordering preferences.
 - [X]  #14 User watchlists & annotations
 - [X]  #15 Virtualized data grid
 - [X]  #16 Sector / market index
-- [ ]  #17 Auth + rate limiting (recommended regardless)
+- [X]  #17 Auth + rate limiting (recommended regardless)
 - [X]  #18 Async job queue
 - [X]  #19 Observability
 - [X]  #20 Caching layer
@@ -152,18 +153,24 @@ actual repo:
   export, #8 "Ask the analyst" RAG chat with WebSocket streaming, #12 comparison
   view (`/compare`).
 - **Partial:** #7 security model is still a hardcoded `KNOWN_SECURITY_NOTES` dict
-  (not yet externalized to a data file / incident feed); #22 has Vitest +
-  Playwright + respx wired, but no property-based or golden-file tests yet.
+  (not yet externalized to a data file / incident feed); #17 **auth shipped,
+  rate limiting open** — local accounts, opaque sessions, RBAC verbs + ABAC
+  predicates (data scoping, sensitivity gates, environment conditions) and
+  single-use WS tickets are all enforced in FastAPI, with cache-safe per-subject
+  responses and inline denial reasons in the UI. Still open: per-subject rate
+  limits and LLM cost quotas, so a logged-in account can still spend the budget
+  (see [architecture](architecture.md#authentication-and-authorization)); #22 has
+  Vitest + Playwright + respx wired, but no property-based or golden-file tests yet.
 - **Selected but not yet built:** #6 anomaly detection (rules still use static
   thresholds), #9 what-if weight sliders, #10 correlation/contagion, #11 command
   palette, #13 shareable board filters (only `/compare` encodes its selection in
-  the URL), #14 user watchlists (depends on auth), #15 virtualized grid, #18 async
-  job queue (still in-process APScheduler), #19 observability (only `/api/health`
-  + `/api/health/ready` exist today), #20 Redis/ETag caching (in-process TTL only),
-  #21 LLM brief provenance/versioning.
-- **Not selected (recommended regardless):** #17 auth + rate limiting — required
-  before any public deploy, since `POST /api/alerts/run` is an unauthenticated
-  crawl.
+  the URL), #15 virtualized grid, #18 async job queue (still in-process
+  APScheduler), #19 observability (only `/api/health` + `/api/health/ready` exist
+  today), #20 Redis/ETag caching (in-process TTL only), #21 LLM brief
+  provenance/versioning.
+- **Unblocked by #17:** #14 user watchlists & annotations — per-user rows now have
+  a stable `user_id` to key against, so watchlists no longer need a browser-local
+  hack.
 
 ---
 

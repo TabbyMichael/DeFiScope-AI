@@ -16,12 +16,12 @@ const INDICATORS = [
   {
     label: "Stablecoin peg integrity",
     weight: 0.2,
-    desc: "Worst 30-day deviation of any stablecoin the protocol mints. A depeg is the most direct solvency event, so this carries the highest weight — but only issuers in the curated map are scored; everyone else is a gap, never read as on-peg.",
+    desc: "Worst 30-day deviation of any stablecoin the protocol mints. A depeg is the most direct solvency event, so this carries the highest weight. It still only covers issuers in the curated map; everyone else is a gap, never read as on-peg.",
   },
   {
     label: "Chain / liquidity concentration",
     weight: 0.16,
-    desc: "TVL spread across chains (Herfindahl index) — a proxy for shared-infrastructure failure exposure.",
+    desc: "TVL spread across chains (Herfindahl index), used as a proxy for shared-infrastructure failure exposure.",
   },
   {
     label: "TVL volatility (30d)",
@@ -31,12 +31,12 @@ const INDICATORS = [
   {
     label: "Security posture (audits & history)",
     weight: 0.14,
-    desc: "Audit count plus curated incident notes — a prompt for manual review, never a guarantee.",
+    desc: "Audit count plus curated incident notes. A prompt for manual review, never a guarantee.",
   },
   {
     label: "Real-yield dependence (fees ÷ TVL)",
     weight: 0.14,
-    desc: "Trailing-30d fee revenue relative to TVL — value backed by real fees scores safer. Missing fee data is a gap, never counted as safe.",
+    desc: "Trailing-30d fee revenue relative to TVL. Value backed by real fees scores safer. Missing fee data is a gap, never counted as safe.",
   },
   {
     label: "TVL trend (7d / 30d)",
@@ -51,10 +51,10 @@ const INDICATORS = [
 ];
 
 const BANDS = [
-  { band: "Low", range: "0–29", color: "bg-emerald-500" },
-  { band: "Moderate", range: "30–49", color: "bg-yellow-500" },
-  { band: "Elevated", range: "50–69", color: "bg-orange-500" },
-  { band: "High", range: "70–100", color: "bg-red-500" },
+  { band: "Low", range: "0 to 29", color: "bg-emerald-500" },
+  { band: "Moderate", range: "30 to 49", color: "bg-yellow-500" },
+  { band: "Elevated", range: "50 to 69", color: "bg-orange-500" },
+  { band: "High", range: "70 to 100", color: "bg-red-500" },
 ];
 
 const RULES = [
@@ -78,9 +78,9 @@ const CAN_SHOW = [
 ];
 
 const CANNOT_SHOW = [
-  "Whether a TVL move is price-driven or real usage — USD TVL conflates both",
+  "Whether a TVL move is price-driven or real usage. USD TVL conflates both",
   "Whether growth is incentive-driven (emissions schedules are not in this data)",
-  "Smart-contract safety — audit counts are a weak proxy, never a guarantee",
+  "Smart-contract safety. Audit counts are a weak proxy, never a guarantee",
   "Wash trading, sybil activity, or oracle/liquidation risk",
 ];
 
@@ -97,7 +97,7 @@ export default function AboutPage() {
           </h1>
           <p className="mt-1 text-sm text-muted-foreground">
             DeFiScope AI scores protocols using only public TVL data from
-            DefiLlama. Every number is traceable to a documented formula — and
+            DefiLlama. Every number is traceable to a documented formula, and
             every score states what it cannot establish.
           </p>
         </div>
@@ -112,9 +112,10 @@ export default function AboutPage() {
         </CardHeader>
         <CardContent className="space-y-4">
           <p className="text-sm text-muted-foreground">
-            The composite (0–100, where higher is riskier) is a weighted mean of
-            the indicators below. Indicators with missing data are excluded from
-            the average and surfaced as data gaps — unknown is never counted as safe.
+            The composite (0 to 100, where higher is riskier) is a weighted mean
+            of the indicators below. Indicators with missing data are excluded
+            from the average and surfaced as data gaps. Unknown is never counted
+            as safe.
           </p>
           <ul className="space-y-3">
             {INDICATORS.map((i) => (
@@ -158,7 +159,7 @@ export default function AboutPage() {
             ))}
             <p className="pt-1 text-xs text-muted-foreground">
               A low score means &ldquo;low risk on the dimensions TVL data can
-              observe&rdquo; — nothing more.
+              observe&rdquo;, nothing more.
             </p>
           </CardContent>
         </Card>

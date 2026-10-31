@@ -34,6 +34,10 @@ test.describe("dashboard smoke", () => {
     );
     await protocolLinks.first().click();
     await expect(page).toHaveURL(/\/protocols\/[^/]+$/);
-    await expect(page.getByRole("heading").first()).toBeVisible();
+    // Generous timeout: a cold `next dev` compiles /protocols/[slug] on the
+    // first navigation, which can outlast the 5s default.
+    await expect(page.getByRole("heading").first()).toBeVisible({
+      timeout: 15_000,
+    });
   });
 });

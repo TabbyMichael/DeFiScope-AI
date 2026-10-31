@@ -37,7 +37,7 @@ export default function RiskTrendChart({
         </p>
         <p className="max-w-sm text-xs leading-relaxed text-muted-foreground">
           The risk-score trend appears after the scheduler has captured at least
-          two daily snapshots. Only scored days are plotted — the initial
+          two daily snapshots. Only scored days are plotted. The initial
           DefiLlama backfill carries TVL but no score, so it is not faked here.
         </p>
       </div>
@@ -94,7 +94,7 @@ export default function RiskTrendChart({
           }}
           labelStyle={{ color: "var(--muted-foreground)", marginBottom: 2 }}
           formatter={(value, _name, item) => {
-            const band = (item?.payload as RiskPoint | undefined)?.band ?? "—";
+            const band = (item?.payload as RiskPoint | undefined)?.band ?? "n/a";
             return [`${Number(value).toFixed(0)} · ${band}`, "Risk score"];
           }}
         />

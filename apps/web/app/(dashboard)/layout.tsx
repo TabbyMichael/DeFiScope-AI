@@ -2,6 +2,7 @@ import Link from "next/link";
 import { Suspense } from "react";
 
 import { AppSidebar } from "@/components/app-sidebar";
+import { SidebarAuthFooter, UserMenuServer } from "@/components/auth/user-menu-server";
 import { ModeToggle } from "@/components/mode-toggle";
 import { Separator } from "@/components/ui/separator";
 import {
@@ -9,7 +10,7 @@ import {
   SidebarProvider,
   SidebarTrigger,
 } from "@/components/ui/sidebar";
-import { API_PUBLIC_URL } from "@/lib/api";
+import { API_PUBLIC_URL } from "@/lib/api-config";
 
 export default function DashboardLayout({
   children,
@@ -19,7 +20,13 @@ export default function DashboardLayout({
   return (
     <SidebarProvider>
       <Suspense fallback={<div data-slot="sidebar" className="hidden w-0" aria-hidden />}>
-        <AppSidebar />
+        <AppSidebar
+          footer={
+            <Suspense fallback={null}>
+              <SidebarAuthFooter />
+            </Suspense>
+          }
+        />
       </Suspense>
       <SidebarInset>
         <header className="flex h-14 shrink-0 items-center gap-2 border-b px-4">
@@ -42,6 +49,9 @@ export default function DashboardLayout({
                 API
               </a>
             </div>
+            <Suspense fallback={<div className="size-8 animate-pulse rounded-full bg-muted" />}>
+              <UserMenuServer />
+            </Suspense>
             <ModeToggle />
           </div>
         </header>

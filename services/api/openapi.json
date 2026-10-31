@@ -220,7 +220,7 @@
         "type": "object"
       },
       "DashboardResponse": {
-        "description": "Everything the dashboard needs, sourced from the DB (latest snapshot\nper protocol + alert_records) with a live DefiLlama hydration fallback.",
+        "description": "Everything the dashboard needs, sourced from the DB (latest snapshot\nper protocol + alert_records) with a live DefiLlama hydration fallback.\n\n``withheld_alerts`` is the number of critical alerts the caller's clearance\nwas not sufficient to read. It is reported rather than hidden: a board that\nsilently shows three fewer alerts than exist would be lying by omission.",
         "properties": {
           "aggregate_history": {
             "items": {
@@ -256,6 +256,11 @@
           },
           "stats": {
             "$ref": "#/components/schemas/DashboardStats"
+          },
+          "withheld_alerts": {
+            "default": 0,
+            "title": "Withheld Alerts",
+            "type": "integer"
           }
         },
         "required": [
@@ -330,6 +335,50 @@
         "title": "HTTPValidationError",
         "type": "object"
       },
+      "LoginRequest": {
+        "properties": {
+          "email": {
+            "maxLength": 254,
+            "minLength": 3,
+            "title": "Email",
+            "type": "string"
+          },
+          "password": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Password",
+            "type": "string"
+          }
+        },
+        "required": [
+          "email",
+          "password"
+        ],
+        "title": "LoginRequest",
+        "type": "object"
+      },
+      "LoginResponse": {
+        "properties": {
+          "expires_at": {
+            "title": "Expires At",
+            "type": "string"
+          },
+          "subject": {
+            "$ref": "#/components/schemas/SubjectOut"
+          },
+          "token": {
+            "title": "Token",
+            "type": "string"
+          }
+        },
+        "required": [
+          "token",
+          "subject",
+          "expires_at"
+        ],
+        "title": "LoginResponse",
+        "type": "object"
+      },
       "Mover": {
         "description": "A protocol ranked by 7d TVL change (used for top gainers/losers).",
         "properties": {
@@ -352,6 +401,124 @@
           "change_7d"
         ],
         "title": "Mover",
+        "type": "object"
+      },
+      "OnchainActivityOut": {
+        "description": "On-chain activity from Dune - the second, additive data provider.\n\nAlways present on a research payload, because *why* there is no number is\npart of the answer: ``unconfigured`` (no key), ``no_data`` (no curated\nmapping or nothing captured yet), ``stale``, ``partial`` (a mapped chain\ndid not report) or ``ok``. An omitted block could not tell those apart, and\na zero would assert \"no activity\" - a claim these measurements never make.\n\n``source`` is per block rather than per protocol: this block is Dune's,\nwhile ``ProtocolOverview.source`` stays DefiLlama's.",
+        "properties": {
+          "active_wallets": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Active Wallets"
+          },
+          "as_of": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "As Of"
+          },
+          "chains": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Chains",
+            "type": "array"
+          },
+          "missing_chains": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Missing Chains",
+            "type": "array"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "returning_wallet_share": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Returning Wallet Share"
+          },
+          "returning_wallets": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Returning Wallets"
+          },
+          "source": {
+            "const": "dune",
+            "default": "dune",
+            "title": "Source",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "ok",
+              "partial",
+              "stale",
+              "no_data",
+              "unconfigured"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "tx_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tx Count"
+          },
+          "tx_volume_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tx Volume Usd"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "OnchainActivityOut",
         "type": "object"
       },
       "ProtocolOverview": {
@@ -633,6 +800,9 @@
             "title": "Name",
             "type": "string"
           },
+          "onchain": {
+            "$ref": "#/components/schemas/OnchainActivityOut"
+          },
           "overview": {
             "$ref": "#/components/schemas/ProtocolOverview"
           },
@@ -673,6 +843,7 @@
           "slug",
           "name",
           "overview",
+          "onchain",
           "as_of"
         ],
         "title": "ProtocolResearch",
@@ -858,6 +1029,107 @@
         "title": "RiskPoint",
         "type": "object"
       },
+      "SubjectOut": {
+        "description": "The authenticated caller, as the UI needs it.\n\n``categories`` / ``chains`` come back as ``[\"*\"]`` when the axis is\nunrestricted, and ``permissions`` is the resolved RBAC verb list so the\nclient can disable a control instead of discovering the 403 the hard way.",
+        "properties": {
+          "authenticated": {
+            "default": true,
+            "title": "Authenticated",
+            "type": "boolean"
+          },
+          "categories": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Categories",
+            "type": "array"
+          },
+          "chains": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Chains",
+            "type": "array"
+          },
+          "clearance": {
+            "default": 1,
+            "title": "Clearance",
+            "type": "integer"
+          },
+          "email": {
+            "title": "Email",
+            "type": "string"
+          },
+          "permissions": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Permissions",
+            "type": "array"
+          },
+          "role": {
+            "title": "Role",
+            "type": "string"
+          },
+          "team": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Team"
+          },
+          "user_id": {
+            "title": "User Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "user_id",
+          "email",
+          "role"
+        ],
+        "title": "SubjectOut",
+        "type": "object"
+      },
+      "SwitchRequest": {
+        "description": "Demo-mode role switch: re-issue a session for another seeded account.",
+        "properties": {
+          "email": {
+            "maxLength": 254,
+            "minLength": 3,
+            "title": "Email",
+            "type": "string"
+          }
+        },
+        "required": [
+          "email"
+        ],
+        "title": "SwitchRequest",
+        "type": "object"
+      },
+      "TicketResponse": {
+        "description": "Single-use credential for the browser-opened ``WS /ws/chat`` socket.",
+        "properties": {
+          "expires_in": {
+            "title": "Expires In",
+            "type": "integer"
+          },
+          "ticket": {
+            "title": "Ticket",
+            "type": "string"
+          }
+        },
+        "required": [
+          "ticket",
+          "expires_in"
+        ],
+        "title": "TicketResponse",
+        "type": "object"
+      },
       "TvlPoint": {
         "properties": {
           "date": {
@@ -927,7 +1199,7 @@
   "paths": {
     "/api/alerts": {
       "get": {
-        "description": "Today's active alerts, served straight from the durable log.\n\nThis is a fast DB read - it does NOT trigger a crawl. The scheduler and\n``POST /api/alerts/run`` are the owners of the (expensive) DefiLlama\nmonitoring pass that populates these rows.",
+        "description": "Today's active alerts, served straight from the durable log.\n\nThis is a fast DB read - it does NOT trigger a crawl. The scheduler and\n``POST /api/alerts/run`` are the owners of the (expensive) DefiLlama\nmonitoring pass that populates these rows.\n\nCritical alerts above the caller's clearance are withheld from the body and\ncounted in ``X-Withheld-Alerts``: the reader still learns that something\nbroke, without learning what.",
         "operationId": "current_alerts_api_alerts_get",
         "parameters": [
           {
@@ -1022,7 +1294,7 @@
     },
     "/api/alerts/run": {
       "post": {
-        "description": "Manual/admin trigger for a full monitoring pass: crawl the watchlist,\nevaluate rules, persist alerts + daily snapshots, then return the alerts\nthat fired on this pass (the same set ``GET /api/alerts`` will now serve).",
+        "description": "Manual trigger for a full monitoring pass: crawl the watchlist,\nevaluate rules, persist alerts + daily snapshots, then return the alerts\nthat fired on this pass (the same set ``GET /api/alerts`` will now serve).\n\nGated twice beyond the role: a pass outside business hours is refused, and a\npass over a *fresh* snapshot is refused as redundant - a crawl that cannot\nchange anything is wasted upstream quota, not diligence. Both denials come\nback as an explanation rather than a bare 403.",
         "operationId": "run_alert_check_api_alerts_run_post",
         "responses": {
           "200": {
@@ -1043,6 +1315,152 @@
         "summary": "Run Alert Check",
         "tags": [
           "alerts"
+        ]
+      }
+    },
+    "/api/auth/login": {
+      "post": {
+        "operationId": "login_api_auth_login_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LoginRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LoginResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Login",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/auth/logout": {
+      "post": {
+        "description": "Delete the session row. Idempotent: an already-dead token is not an error,\nbecause the caller's intent (be logged out) is satisfied either way.",
+        "operationId": "logout_api_auth_logout_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Logout",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/auth/me": {
+      "get": {
+        "operationId": "me_api_auth_me_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubjectOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Me",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/auth/switch": {
+      "post": {
+        "description": "Demo only: become another seeded account without typing a password.\n\nDisabled in ``required`` mode - impersonation is a tour affordance, not a\nfeature of a real deployment. The caller's previous session is revoked so\nthe switch is an identity transition rather than a second live credential.",
+        "operationId": "switch_api_auth_switch_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SwitchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LoginResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Switch",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/auth/ticket": {
+      "post": {
+        "description": "Mint a single-use, short-lived credential for the browser's WebSocket.\n\nGated on ``chat:ask`` so the ticket can never out-rank the verb that\nmatters: a role that cannot ask questions cannot get a socket either.",
+        "operationId": "ws_ticket_api_auth_ticket_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TicketResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Ws Ticket",
+        "tags": [
+          "auth"
         ]
       }
     },
@@ -1090,7 +1508,7 @@
     },
     "/api/briefs/{slug}/export": {
       "get": {
-        "description": "Render the brief for download as Markdown, CSV or PDF.\n\nReturns raw bytes with a ``Content-Disposition: attachment`` header so the\nbrowser saves the file. Unknown formats are a 400; an unfetchable protocol\nis a 404 (mirrors the JSON brief endpoint). The web app proxies this through\na same-origin route handler so the compose-internal API URL stays server-side.",
+        "description": "Render the brief for download as Markdown, CSV or PDF.\n\nReturns raw bytes with a ``Content-Disposition: attachment`` header so the\nbrowser saves the file. Unknown formats are a 400; an unfetchable protocol\nis a 404 (mirrors the JSON brief endpoint). The web app proxies this through\na same-origin route handler so the compose-internal API URL stays server-side.\n\nThe confidence gate is evaluated after the brief is composed because\nconfidence is a property of the brief itself - there is no cheaper way to\nknow it in advance. A denied export therefore costs the same generation as\nan allowed one; the cost ceiling for that lives in the deferred\nper-subject rate limiting, not here.",
         "operationId": "export_brief_api_briefs__slug__export_get",
         "parameters": [
           {

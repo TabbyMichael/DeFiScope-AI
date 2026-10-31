@@ -28,7 +28,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { fmtPct, fmtUsd } from "@/lib/api";
+import { fmtPct, fmtUsd } from "@/lib/api-config";
 import type { ProtocolOverview } from "@/lib/types";
 
 type SortKey = "name" | "tvl" | "change_7d" | "change_30d" | "risk_score";
@@ -39,7 +39,7 @@ const ALL = "all";
 const BANDS = ["low", "moderate", "elevated", "high", "unknown"];
 
 function ChangeCell({ value }: { value: number | null }) {
-  if (value == null) return <span className="text-muted-foreground">—</span>;
+  if (value == null) return <span className="text-muted-foreground">n/a</span>;
   const tone =
     value > 1
       ? "text-emerald-600 dark:text-emerald-400"
@@ -143,7 +143,7 @@ export default function ProtocolTable({
         <CardTitle>Protocols</CardTitle>
         <div className="ml-auto flex flex-wrap items-center gap-2">
           <Select value={category} onValueChange={setCategory}>
-            <SelectTrigger size="sm" className="w-[150px]">
+            <SelectTrigger size="sm" className="w-[150px]" aria-label="Filter by category">
               <SelectValue placeholder="Category" />
             </SelectTrigger>
             <SelectContent>
@@ -154,7 +154,7 @@ export default function ProtocolTable({
             </SelectContent>
           </Select>
           <Select value={band} onValueChange={setBand}>
-            <SelectTrigger size="sm" className="w-[140px]">
+            <SelectTrigger size="sm" className="w-[140px]" aria-label="Filter by risk band">
               <SelectValue placeholder="Risk band" />
             </SelectTrigger>
             <SelectContent>
@@ -192,7 +192,7 @@ export default function ProtocolTable({
                     </span>
                   )}
                 </TableCell>
-                <TableCell className="hidden text-muted-foreground md:table-cell">{p.category ?? "—"}</TableCell>
+                <TableCell className="hidden text-muted-foreground md:table-cell">{p.category ?? "n/a"}</TableCell>
                 <TableCell className="text-right tabular-nums">{fmtUsd(p.tvl)}</TableCell>
                 <TableCell className="text-right"><ChangeCell value={p.change_7d} /></TableCell>
                 <TableCell className="hidden text-right lg:table-cell"><ChangeCell value={p.change_30d} /></TableCell>

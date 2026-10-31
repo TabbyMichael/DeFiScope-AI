@@ -41,8 +41,8 @@ export default function AskPage() {
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">Ask the analyst</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Grounded questions over the risk methodology and each protocol&apos;s captured evidence —
-          always cited, and honest about what the data can&apos;t establish.
+          Grounded questions over the risk methodology and each protocol&apos;s captured evidence.
+          Always cited, and honest about what the data can&apos;t establish.
         </p>
       </div>
       <Suspense fallback={<AskSkeleton />}>

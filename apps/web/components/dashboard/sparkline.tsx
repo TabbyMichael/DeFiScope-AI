@@ -19,7 +19,7 @@ export default function Sparkline({
         : "var(--color-zinc-500)";
 
   if (!data || data.length < 2) {
-    return <div className="h-8 w-24 text-xs text-muted-foreground">—</div>;
+    return <div className="h-8 w-24 text-xs text-muted-foreground">n/a</div>;
   }
 
   return (

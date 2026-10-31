@@ -25,7 +25,7 @@ const NAV = [
   { title: "Methodology", href: "/about", icon: BookText },
 ];
 
-export function AppSidebar() {
+export function AppSidebar({ footer }: { footer?: React.ReactNode }) {
   const pathname = usePathname();
 
   return (
@@ -76,10 +76,12 @@ export function AppSidebar() {
       </SidebarContent>
 
       <SidebarFooter>
-        <div className="px-2 py-1 text-xs leading-relaxed text-muted-foreground group-data-[collapsible=icon]:hidden">
-          Data source: DefiLlama public API. Scores measure what TVL data can
-          show.
-        </div>
+        {footer ?? (
+          <div className="px-2 py-1 text-xs leading-relaxed text-muted-foreground group-data-[collapsible=icon]:hidden">
+            Data source: DefiLlama public API. Scores measure what TVL data can
+            show.
+          </div>
+        )}
       </SidebarFooter>
       <SidebarRail />
     </Sidebar>

@@ -19,6 +19,9 @@ from app.config import get_settings
 from app.db import AlertRecord, ProtocolSnapshot
 from app.notifiers import Notification, build_notifiers, severity_at_least
 from app.schemas import Alert
+from app.security.policy import split_visible_alerts
+from app.security.principal import Subject
+from app.services import onchain
 from app.services.protocols import (
     ProtocolResearchService,
     ResearchPack,
@@ -62,6 +65,24 @@ def today_alerts(session: Session, limit: int = 50) -> list[Alert]:
         )
         for r in rows
     ]
+
+
+def today_alerts_for(
+    session: Session,
+    subject: Subject,
+    *,
+    limit: int = 50,
+    visible_slugs: set[str] | None = None,
+) -> tuple[list[Alert], int]:
+    """Today's alerts narrowed to what ``subject`` may read, plus the withheld count.
+
+    A wider pool is read than ``limit`` so the gates cannot shrink the feed:
+    withholding removes *content*, and it must never silently drop the rows that
+    would otherwise have been visible.
+    """
+    pool = today_alerts(session, limit=max(limit, 200))
+    visible, withheld = split_visible_alerts(pool, subject, visible_slugs=visible_slugs)
+    return visible[:limit], withheld
 
 
 def evaluate_pack(pack: ResearchPack) -> list[Alert]:
@@ -411,7 +432,19 @@ async def run_monitor(svc: ProtocolResearchService, http, session: Session) -> l
     new alerts out to any configured delivery channels. Called by the scheduler
     and the manual trigger endpoint."""
     slugs = await svc.watchlist_slugs(http)
-    packs = await svc.get_packs(slugs, http)
+    # On-chain activity (second provider) is fetched *before* the packs are
+    # built, so a pass renders the numbers it just measured rather than the
+    # previous pass's. Strictly best-effort: this is the one place Dune is ever
+    # called, and a Dune outage must cost the pass its on-chain block, not the
+    # whole run. ``refresh`` is a no-op unless a key and a query id exist.
+    try:
+        await onchain.refresh(session, http, slugs, svc.settings)
+    except Exception:  # noqa: BLE001 - second provider must never sink the pass
+        logger.exception("On-chain refresh failed; continuing without it")
+    # The session is threaded through so the packs built below pick up the rows
+    # just written. Alert rules do not read ``pack.onchain``, but the snapshot
+    # and RAG steps do, and they must see this pass's measurement.
+    packs = await svc.get_packs(slugs, http, session=session)
     alerts: list[Alert] = []
     for pack in packs:
         try:

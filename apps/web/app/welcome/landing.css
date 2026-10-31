@@ -1,0 +1,1104 @@
+/* ============================================================================
+   DeFiScope AI landing — scoped global stylesheet
+   ----------------------------------------------------------------------------
+   Why not a CSS module? `next.config.ts` routes every `*.css` through
+   `@tailwindcss/turbopack` with `as: "*.css"`, which re-emits the file as
+   `foo.module.css.css`. Next then stops recognising it as a module and the
+   `styles` import comes back as empty strings — every class renders "undefined".
+   Rather than narrow that rule (it is what makes Tailwind work everywhere
+   else), this page uses one global sheet and prefixes every class with `ds-`,
+   so nothing here can collide with the product UI and nothing there can reach
+   this page. Loaded only by `app/welcome/layout.tsx`.
+
+   The hero is drawn on a 1280 × 760 reference render and expressed through one
+   unit: `--u`. Every desktop measurement is `calc(N * var(--u))`, so the whole
+   composition scales as a single object instead of accumulating breakpoint
+   patches. Below 1160px the unit is clamped and the layout is re-solved.
+
+   The reference was violet. This build is green: the film is hue-rotated at the
+   pixel level and every accent (ring, eyebrow, icon, glow) is emerald.
+   ========================================================================== */
+
+.ds-root {
+  --u: min(calc(100vw / 1280), calc(100dvh / 760));
+
+  --ink: #ffffff;
+  --ink-muted: #ededed;
+  --panel: #181818;
+  --white-btn: #fdfdfd;
+  --btn-ink: #050505;
+  --glass-fill: rgba(0, 0, 0, 0.78);
+  --glass-line: rgba(255, 255, 255, 0.09);
+
+  /* Green identity. */
+  --accent: #34d399;
+  --accent-soft: rgba(52, 211, 153, 0.14);
+  --accent-line: rgba(52, 211, 153, 0.34);
+  --glow: rgba(16, 185, 129, 0.45);
+  --video-hue: -118deg; /* violet (~275°) -> emerald (~157°) */
+
+  --dx: 8.5; /* hero block optical offset, solved against the reference render */
+  --dy: 13.1;
+
+  --night: #050807;
+  --night-raise: #080d0b;
+
+  position: relative;
+  isolation: isolate;
+  width: 100%;
+  background: var(--night);
+  color: var(--ink);
+  font-family: var(--font-display), "Plus Jakarta Sans", -apple-system,
+    BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: geometricPrecision;
+  scroll-behavior: smooth;
+}
+
+@supports not (height: 100dvh) {
+  .ds-root {
+    --u: min(calc(100vw / 1280), calc(100vh / 760));
+  }
+}
+
+.ds-root *,
+.ds-root *::before,
+.ds-root *::after {
+  box-sizing: border-box;
+}
+
+.ds-root :focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+  border-radius: 999px;
+}
+
+/* Keyboard escape hatch: invisible until it is focused. */
+.ds-skip {
+  position: absolute;
+  left: 50%;
+  top: 10px;
+  z-index: 100;
+  padding: 10px 18px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #04130d;
+  font-size: 13px;
+  font-weight: 600;
+  text-decoration: none;
+  transform: translate(-50%, -160%);
+  transition: transform 0.2s ease;
+}
+.ds-skip:focus-visible {
+  transform: translate(-50%, 0);
+}
+
+/* ============================================================================
+   Hero
+   ========================================================================== */
+.ds-hero {
+  position: relative;
+  width: 100%;
+  height: 100dvh;
+  overflow: hidden;
+  background: #000;
+}
+@supports not (height: 100dvh) {
+  .ds-hero {
+    height: 100vh;
+  }
+}
+
+/* The film is 16:10 and cover-cropped from a box that is always at least as
+   wide as 1.6 × the viewport height, so no letterboxing can appear. */
+.ds-bg {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: max(100vw, calc(100dvh * 1.6));
+  height: max(62.5vw, 100dvh);
+  background-color: #000;
+}
+@supports not (height: 100dvh) {
+  .ds-bg {
+    width: max(100vw, calc(100vh * 1.6));
+    height: max(62.5vw, 100vh);
+  }
+}
+
+.ds-bg-video {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: 51% 8%; /* framing inherited from the still it replaces */
+  background-color: #000;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.9s linear;
+  /* The one change that turns a violet globe into a green one, with no
+     re-encode and no second asset to ship. Pulled just off full saturation:
+     emerald at 1.2 goes radioactive on an OLED panel. */
+  filter: hue-rotate(var(--video-hue)) saturate(0.95) brightness(0.97)
+    contrast(1.02);
+}
+.ds-is-active {
+  opacity: 1;
+}
+
+/* Atmosphere: a green bloom over the globe and a scrim that buys the headline
+   contrast without dimming the whole frame. */
+.ds-tint {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  background:
+    /* A soft scrim under the headline only: the globe's brightest band is
+       exactly where the type sits, and white on that green is roughly 3:1. */
+    radial-gradient(
+      46% 30% at 50% 46%,
+      rgba(3, 8, 6, 0.38),
+      rgba(3, 8, 6, 0) 72%
+    ),
+    radial-gradient(
+      58% 46% at 50% 44%,
+      rgba(16, 185, 129, 0.14),
+      rgba(16, 185, 129, 0) 70%
+    ),
+    linear-gradient(
+      to bottom,
+      rgba(3, 8, 6, 0.55) 0%,
+      rgba(3, 8, 6, 0.1) 22%,
+      rgba(3, 8, 6, 0) 46%,
+      rgba(3, 8, 6, 0.34) 74%,
+      rgba(5, 8, 7, 0.92) 100%
+    );
+}
+
+/* ============================================================================
+   Nav — fixed, so the same bar can hang over the film and then over the page
+   ========================================================================== */
+.ds-nav {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 50;
+  height: calc(67 * var(--u));
+  display: flex;
+  align-items: center;
+  padding-left: calc(24.5 * var(--u));
+  padding-right: calc(50.7 * var(--u));
+  border-bottom: 1px solid transparent;
+  transition:
+    background 0.25s ease,
+    border-color 0.25s ease,
+    backdrop-filter 0.25s ease;
+}
+.ds-nav-stuck {
+  background: rgba(4, 10, 8, 0.72);
+  border-bottom-color: rgba(255, 255, 255, 0.07);
+  -webkit-backdrop-filter: blur(16px) saturate(140%);
+  backdrop-filter: blur(16px) saturate(140%);
+}
+
+.ds-logo {
+  display: inline-flex;
+  align-items: center;
+  gap: calc(7 * var(--u));
+  color: var(--ink);
+  font-size: calc(26 * var(--u));
+  font-weight: 800;
+  letter-spacing: calc(0.45 * var(--u));
+  line-height: 1;
+  text-decoration: none;
+  white-space: nowrap;
+  transform: translateY(calc(-2.4 * var(--u)));
+}
+.ds-logo-dot {
+  width: calc(7 * var(--u));
+  height: calc(7 * var(--u));
+  border-radius: 999px;
+  background: var(--accent);
+  box-shadow: 0 0 0 calc(3 * var(--u)) rgba(52, 211, 153, 0.16);
+}
+/* The product mark is "DeFiScope AI" — the suffix rides small and green so the
+   two halves read as one wordmark rather than two words. */
+.ds-logo-ai {
+  color: var(--accent);
+  font-size: calc(13.5 * var(--u));
+  font-weight: 700;
+  letter-spacing: calc(1.1 * var(--u));
+  margin-left: calc(-2.5 * var(--u));
+  transform: translateY(calc(-3 * var(--u)));
+}
+
+.ds-nav-links {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  display: flex;
+  align-items: center;
+  gap: calc(24.3 * var(--u));
+  white-space: nowrap;
+  transform: translate(-50%, -50%) translateX(calc(-23 * var(--u)));
+}
+.ds-nav-links a {
+  color: var(--ink-muted);
+  font-size: calc(11.5 * var(--u));
+  font-weight: 500;
+  letter-spacing: calc(-0.15 * var(--u));
+  line-height: 1;
+  text-decoration: none;
+  transition: color 0.18s ease;
+}
+.ds-nav-links a:hover {
+  color: var(--accent);
+}
+
+.ds-nav-actions {
+  display: flex;
+  align-items: center;
+  gap: calc(6.8 * var(--u));
+  margin-left: auto;
+}
+
+/* --- buttons (shared) --- */
+.ds-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-family: inherit;
+  white-space: nowrap;
+  text-decoration: none;
+  border: 0;
+  cursor: pointer;
+}
+
+.ds-btn-login {
+  height: calc(28 * var(--u));
+  padding: 0 calc(12.9 * var(--u));
+  border-radius: calc(14 * var(--u));
+  background: var(--panel);
+  color: #e8e8e8;
+  font-size: calc(11.5 * var(--u));
+  font-weight: 500;
+  letter-spacing: calc(-0.15 * var(--u));
+  transition:
+    background 0.18s ease,
+    color 0.18s ease;
+}
+.ds-btn-login:hover {
+  background: #232323;
+  color: #fff;
+}
+
+.ds-btn-nav-start {
+  height: calc(28 * var(--u));
+  gap: calc(7 * var(--u));
+  padding-left: calc(13.5 * var(--u));
+  padding-right: calc(14.5 * var(--u));
+  border-radius: calc(14 * var(--u));
+  background: var(--white-btn);
+  color: var(--btn-ink);
+  font-size: calc(11.1 * var(--u));
+  font-weight: 500;
+  transition:
+    background 0.18s ease,
+    box-shadow 0.18s ease;
+}
+.ds-btn-nav-start:hover {
+  background: #f2fff9;
+  box-shadow: 0 0 0 1px rgba(52, 211, 153, 0.4);
+}
+.ds-btn-nav-start .ds-arrow {
+  width: calc(11.5 * var(--u));
+  height: calc(9.6 * var(--u));
+}
+
+/* --- burger (below the tablet breakpoint) --- */
+.ds-burger {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  margin-left: auto;
+  width: calc(40 * var(--u));
+  height: calc(28 * var(--u));
+  padding: 0;
+  border: 0;
+  border-radius: calc(14 * var(--u));
+  background: var(--panel);
+  cursor: pointer;
+}
+.ds-burger-bars {
+  position: relative;
+  display: block;
+  width: 16px;
+  height: 1.5px;
+  border-radius: 2px;
+  background: #ededed;
+  transition: background 0.2s ease;
+}
+.ds-burger-bars::before,
+.ds-burger-bars::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  width: 16px;
+  height: 1.5px;
+  border-radius: 2px;
+  background: #ededed;
+  transition: transform 0.2s ease;
+}
+.ds-burger-bars::before {
+  top: -5px;
+}
+.ds-burger-bars::after {
+  top: 5px;
+}
+.ds-burger-open .ds-burger-bars {
+  background: transparent;
+}
+.ds-burger-open .ds-burger-bars::before {
+  transform: translateY(5px) rotate(45deg);
+}
+.ds-burger-open .ds-burger-bars::after {
+  transform: translateY(-5px) rotate(-45deg);
+}
+
+.ds-arrow {
+  flex: 0 0 auto;
+  display: block;
+}
+
+/* ============================================================================
+   Hero content
+   ========================================================================== */
+.ds-hero-inner {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  z-index: 2;
+  width: max-content;
+  text-align: center;
+  transform: translate(-50%, -50%)
+    translate(calc(var(--dx) * var(--u)), calc(var(--dy) * var(--u)));
+}
+
+.ds-h1 {
+  margin: 0;
+  color: var(--ink);
+  font-size: calc(89 * var(--u));
+  font-weight: 500;
+  line-height: calc(90 * var(--u));
+  letter-spacing: calc(-1 * var(--u));
+}
+
+/* Each headline line is its own mask. The padding buys the glyphs room inside
+   the clip box and the negative margin takes that room back out of the layout,
+   so the two-line block still measures exactly two 90u lines. */
+.ds-ln {
+  display: block;
+  overflow: hidden;
+  padding: 0.07em 0 0.11em;
+  margin: -0.07em 0 -0.11em;
+}
+.ds-ln-inner {
+  display: block;
+}
+
+.ds-sub {
+  margin: calc(16.1 * var(--u)) 0 0;
+  color: #f6f6f6;
+  font-size: calc(17.4 * var(--u));
+  font-weight: 300;
+  line-height: calc(27 * var(--u));
+  letter-spacing: calc(-0.3 * var(--u));
+}
+
+.ds-ctas {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: calc(7 * var(--u));
+  margin-top: calc(21.8 * var(--u));
+  transform: translateX(calc(-0.75 * var(--u)));
+}
+
+.ds-btn-lg {
+  height: calc(39 * var(--u));
+  gap: calc(9 * var(--u));
+  border-radius: calc(19.5 * var(--u));
+  font-size: calc(13.3 * var(--u));
+  font-weight: 500;
+  letter-spacing: calc(-0.3 * var(--u));
+}
+.ds-btn-primary {
+  padding-left: calc(18.2 * var(--u));
+  padding-right: calc(19.2 * var(--u));
+  background: var(--white-btn);
+  color: var(--btn-ink);
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.08),
+    0 18px 46px -22px var(--glow);
+  transition:
+    background 0.18s ease,
+    box-shadow 0.18s ease;
+}
+.ds-btn-primary:hover {
+  background: #f2fff9;
+  box-shadow:
+    0 0 0 1px rgba(52, 211, 153, 0.42),
+    0 22px 54px -20px var(--glow);
+}
+.ds-btn-ghost {
+  padding: 0 calc(17.4 * var(--u));
+  border: 1px solid var(--glass-line);
+  background: var(--glass-fill);
+  color: #d9d9d9;
+  -webkit-backdrop-filter: blur(2px);
+  backdrop-filter: blur(2px);
+  transition:
+    background 0.18s ease,
+    border-color 0.18s ease,
+    color 0.18s ease;
+}
+.ds-btn-ghost:hover {
+  background: rgba(0, 0, 0, 0.66);
+  border-color: var(--accent-line);
+  color: #fff;
+}
+.ds-btn-lg .ds-arrow {
+  width: calc(13 * var(--u));
+  height: calc(10.8 * var(--u));
+}
+
+/* ============================================================================
+   Mobile menu
+   ========================================================================== */
+.ds-menu {
+  display: none;
+}
+.ds-menu-open {
+  display: block;
+  animation: ds-menu-in 0.26s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+@keyframes ds-menu-in {
+  from {
+    opacity: 0;
+    transform: translateY(-6px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.ds-menu a {
+  display: block;
+  padding: 11px 14px;
+  border-radius: 12px;
+  color: var(--ink-muted);
+  font-size: 15px;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  text-decoration: none;
+  transition:
+    background 0.16s ease,
+    color 0.16s ease;
+}
+.ds-menu a:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: #fff;
+}
+
+.ds-divider {
+  height: 1px;
+  margin: 8px 6px;
+  background: var(--glass-line);
+}
+
+/* `.ds-menu a` is (0,1,1) and would otherwise win the `display` fight, so the
+   primary item is styled through a selector of equal-or-greater weight. */
+.ds-menu .ds-m-start {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 8px;
+  padding: 13px 14px;
+  border-radius: 12px;
+  background: var(--white-btn);
+  color: var(--btn-ink) !important;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.ds-menu .ds-m-start:hover {
+  background: #f2fff9;
+  color: var(--btn-ink) !important;
+}
+.ds-menu .ds-m-start .ds-arrow {
+  width: 13px;
+  height: 11px;
+}
+
+/* ============================================================================
+   Entrance — waits on document.fonts.ready (see defiscope-landing.tsx)
+   ========================================================================== */
+.ds-root[data-landing="pending"] .ds-nav {
+  opacity: 0;
+}
+.ds-root[data-landing="pending"] .ds-ln-inner {
+  opacity: 0;
+  transform: translateY(112%);
+}
+.ds-root[data-landing="pending"] .ds-sub {
+  opacity: 0;
+  transform: translateY(calc(9 * var(--u)));
+}
+.ds-root[data-landing="pending"] .ds-ctas {
+  opacity: 0;
+  transform: translateX(calc(-0.75 * var(--u))) translateY(calc(9 * var(--u)));
+}
+
+.ds-root[data-landing="ready"] .ds-nav {
+  opacity: 1;
+  transition: opacity 0.8s ease 0.05s;
+}
+
+.ds-root[data-landing="ready"] .ds-ln-inner {
+  opacity: 1;
+  transform: none;
+  transition:
+    opacity 0.9s ease,
+    transform 1.05s cubic-bezier(0.16, 0.84, 0.24, 1);
+}
+.ds-root[data-landing="ready"] .ds-ln:nth-child(2) .ds-ln-inner {
+  transition-delay: 0.1s;
+}
+
+.ds-root[data-landing="ready"] .ds-sub {
+  opacity: 1;
+  transform: none;
+  transition:
+    opacity 0.9s ease 0.26s,
+    transform 1s cubic-bezier(0.16, 0.84, 0.24, 1) 0.26s;
+}
+
+.ds-root[data-landing="ready"] .ds-ctas {
+  opacity: 1;
+  transform: translateX(calc(-0.75 * var(--u)));
+  transition:
+    opacity 0.9s ease 0.4s,
+    transform 1s cubic-bezier(0.16, 0.84, 0.24, 1) 0.4s;
+}
+
+/* ============================================================================
+   Sections below the fold
+   ========================================================================== */
+.ds-section {
+  position: relative;
+  padding: clamp(64px, 8.5vw, 124px) clamp(20px, 4vw, 48px);
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  background: var(--night);
+  scroll-margin-top: 88px;
+}
+.ds-section-raise {
+  background:
+    radial-gradient(
+      90% 60% at 50% 0%,
+      rgba(16, 185, 129, 0.07),
+      rgba(16, 185, 129, 0) 60%
+    ),
+    var(--night-raise);
+}
+.ds-section-inner {
+  max-width: 1160px;
+  margin: 0 auto;
+}
+
+.ds-eyebrow {
+  margin: 0 0 16px;
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.ds-h2 {
+  max-width: 22ch;
+  margin: 0;
+  font-size: clamp(30px, 4vw, 52px);
+  font-weight: 500;
+  line-height: 1.06;
+  letter-spacing: -0.03em;
+}
+.ds-h2 em {
+  font-style: normal;
+  color: var(--accent);
+}
+
+.ds-lede {
+  max-width: 56ch;
+  margin: 20px 0 0;
+  color: rgba(255, 255, 255, 0.62);
+  font-size: clamp(15px, 1.25vw, 17px);
+  font-weight: 300;
+  line-height: 1.65;
+}
+
+.ds-cards {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+  margin: 48px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ds-card {
+  position: relative;
+  padding: 24px 22px 26px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 18px;
+  background: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.05),
+    rgba(255, 255, 255, 0.012)
+  );
+  transition:
+    border-color 0.2s ease,
+    transform 0.2s ease;
+}
+.ds-card:hover {
+  border-color: var(--accent-line);
+  transform: translateY(-2px);
+}
+.ds-card-icon {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  margin-bottom: 18px;
+  border-radius: 12px;
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.ds-card-title {
+  margin: 0 0 8px;
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+.ds-card-text {
+  margin: 0;
+  color: rgba(255, 255, 255, 0.58);
+  font-size: 14px;
+  font-weight: 300;
+  line-height: 1.6;
+}
+
+/* --- how it works --- */
+.ds-how-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: clamp(28px, 4vw, 56px);
+  align-items: start;
+  margin-top: 48px;
+}
+
+.ds-steps {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  counter-reset: step;
+}
+.ds-step {
+  position: relative;
+  padding: 0 0 28px 46px;
+  counter-increment: step;
+}
+.ds-step:last-child {
+  padding-bottom: 0;
+}
+.ds-step::before {
+  content: counter(step, decimal-leading-zero);
+  position: absolute;
+  left: 0;
+  top: 1px;
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+.ds-step::after {
+  content: "";
+  position: absolute;
+  left: 11px;
+  top: 20px;
+  bottom: 6px;
+  width: 1px;
+  background: linear-gradient(
+    to bottom,
+    rgba(52, 211, 153, 0.3),
+    rgba(255, 255, 255, 0.06)
+  );
+}
+.ds-step:last-child::after {
+  display: none;
+}
+.ds-step-title {
+  margin: 0 0 6px;
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+.ds-step-text {
+  margin: 0;
+  color: rgba(255, 255, 255, 0.58);
+  font-size: 14.5px;
+  font-weight: 300;
+  line-height: 1.65;
+}
+
+.ds-code {
+  margin: 0;
+  padding: 20px 22px;
+  overflow-x: auto;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 16px;
+  background:
+    linear-gradient(180deg, rgba(52, 211, 153, 0.06), rgba(0, 0, 0, 0)),
+    #070b09;
+  color: #cfe3d9;
+  font-family: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo,
+    monospace;
+  font-size: 12.5px;
+  line-height: 1.9;
+  tab-size: 2;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+.ds-code-line {
+  display: block;
+  white-space: pre;
+}
+.ds-code-verb {
+  color: var(--accent);
+}
+.ds-code-key {
+  color: #9fb8ad;
+}
+.ds-code-str {
+  color: #e6f5ee;
+}
+
+/* --- closing --- */
+.ds-contact {
+  text-align: center;
+  background:
+    radial-gradient(
+      70% 80% at 50% 0%,
+      rgba(16, 185, 129, 0.16),
+      rgba(16, 185, 129, 0) 62%
+    ),
+    var(--night);
+}
+.ds-contact-inner {
+  max-width: 720px;
+  margin: 0 auto;
+}
+.ds-contact-title {
+  margin: 0;
+  font-size: clamp(32px, 4.6vw, 58px);
+  font-weight: 500;
+  line-height: 1.05;
+  letter-spacing: -0.032em;
+}
+.ds-contact-text {
+  max-width: 46ch;
+  margin: 20px auto 0;
+  color: rgba(255, 255, 255, 0.6);
+  font-size: clamp(15px, 1.3vw, 17px);
+  font-weight: 300;
+  line-height: 1.65;
+}
+.ds-contact-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  justify-content: center;
+  margin-top: 34px;
+}
+/* The hero CTAs are sized in `u`; down here there is no reference render, so
+   they get their own, larger scale. */
+.ds-contact-actions .ds-btn {
+  height: 50px;
+  padding: 0 26px;
+  border-radius: 25px;
+  gap: 10px;
+  font-size: 15px;
+  font-weight: 500;
+}
+.ds-contact-actions .ds-btn-primary {
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.08),
+    0 24px 60px -24px var(--glow);
+}
+.ds-contact-actions .ds-arrow {
+  width: 15px;
+  height: 12.5px;
+}
+
+.ds-footer {
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
+  background: var(--night);
+  padding: 26px clamp(20px, 4vw, 48px) 34px;
+}
+.ds-footer-inner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  max-width: 1160px;
+  margin: 0 auto;
+  color: rgba(255, 255, 255, 0.45);
+  font-size: 13px;
+  font-weight: 300;
+}
+.ds-footer-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 22px;
+}
+.ds-footer-links a {
+  color: inherit;
+  text-decoration: none;
+  transition: color 0.16s ease;
+}
+.ds-footer-links a:hover {
+  color: var(--accent);
+}
+
+/* ============================================================================
+   Breakpoints — derived from the design, not stock values
+   ========================================================================== */
+
+/* TABLET: at ~1155px the 11.5u nav label drops under 10.5px, the 13.3u CTA
+   label under 12px, the 28u pill under 25px, the 17.4u subtitle under 15.5px.
+   Everything holds at 1160. */
+@media (max-width: 1160px) {
+  .ds-root {
+    --u: min(
+      max(0.9px, min(calc(100vw / 1280), calc(100dvh / 760))),
+      calc((100vw - 72px) / 575),
+      calc(100dvh / 620)
+    );
+  }
+
+  .ds-nav {
+    height: max(58px, calc(67 * var(--u)));
+    padding-left: max(24px, calc(28 * var(--u)));
+    padding-right: max(24px, calc(28 * var(--u)));
+  }
+  .ds-nav-links,
+  .ds-nav-actions {
+    display: none;
+  }
+
+  .ds-burger {
+    display: flex;
+    width: max(46px, calc(48 * var(--u)));
+    height: max(38px, calc(34 * var(--u)));
+    border-radius: 999px;
+  }
+
+  .ds-menu {
+    position: fixed;
+    top: calc(max(58px, calc(67 * var(--u))) + 6px);
+    left: max(24px, calc(28 * var(--u)));
+    right: max(24px, calc(28 * var(--u)));
+    z-index: 49;
+    max-height: calc(100dvh - max(58px, calc(67 * var(--u))) - 30px);
+    overflow-y: auto;
+    padding: 8px;
+    border: 1px solid var(--glass-line);
+    border-radius: 18px;
+    background: rgba(8, 16, 13, 0.94);
+    -webkit-backdrop-filter: blur(16px) saturate(120%);
+    backdrop-filter: blur(16px) saturate(120%);
+    box-shadow: 0 24px 60px -20px rgba(0, 0, 0, 0.85);
+  }
+
+  .ds-hero-inner {
+    max-width: calc(100vw - 48px);
+  }
+
+  .ds-h1 {
+    font-size: min(calc(89 * var(--u)), 9vw);
+    line-height: 1.02;
+    letter-spacing: -0.022em;
+  }
+
+  .ds-sub {
+    font-size: max(16px, calc(17.4 * var(--u)));
+    line-height: max(25px, calc(27 * var(--u)));
+  }
+
+  .ds-ctas {
+    flex-wrap: wrap;
+    margin-top: max(26px, calc(21.8 * var(--u)));
+    gap: max(10px, calc(7 * var(--u)));
+  }
+
+  .ds-btn-lg {
+    height: max(44px, calc(39 * var(--u)));
+    border-radius: max(22px, calc(19.5 * var(--u)));
+    font-size: max(13px, calc(13.3 * var(--u)));
+    gap: max(9px, calc(9 * var(--u)));
+  }
+  .ds-btn-primary {
+    padding-left: max(20px, calc(18.2 * var(--u)));
+    padding-right: max(21px, calc(19.2 * var(--u)));
+  }
+  .ds-btn-ghost {
+    padding: 0 max(19px, calc(17.4 * var(--u)));
+  }
+  .ds-btn-lg .ds-arrow {
+    width: max(13px, calc(13 * var(--u)));
+    height: max(11px, calc(10.8 * var(--u)));
+  }
+
+  .ds-cards {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .ds-how-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* MOBILE: below ~720px the mask reveal, the three-line subtitle and the
+   side-by-side CTAs all stop fitting, so each is re-solved rather than scaled:
+   the subtitle lets the viewport reflow it, and the CTAs wrap as a pair instead
+   of stretching to full width (they still read as two choices, not a form). */
+@media (max-width: 720px) {
+  .ds-nav {
+    padding-left: 20px;
+    padding-right: 20px;
+  }
+  .ds-menu {
+    left: 16px;
+    right: 16px;
+  }
+
+  .ds-hero-inner {
+    width: 100%;
+    max-width: calc(100vw - 40px);
+    transform: translate(-50%, -50%) translate(0, calc(6 * var(--u)));
+  }
+
+  .ds-h1 {
+    font-size: min(calc(89 * var(--u)), 11.4vw);
+    line-height: 1.04;
+    letter-spacing: -0.028em;
+  }
+
+  .ds-sub {
+    margin-top: max(16px, calc(16.1 * var(--u)));
+    font-size: max(15px, calc(17.4 * var(--u)));
+    line-height: 1.55;
+    letter-spacing: -0.01em;
+  }
+  /* The reference render's manual line breaks are absurd at 375px: let the copy
+     flow and keep the same words. */
+  .ds-sub br {
+    display: none;
+  }
+
+  .ds-ctas {
+    margin-top: max(24px, calc(21.8 * var(--u)));
+    gap: 10px;
+    transform: none;
+  }
+  .ds-btn-lg {
+    height: 46px;
+    border-radius: 23px;
+    font-size: 14px;
+  }
+
+  .ds-cards {
+    grid-template-columns: minmax(0, 1fr);
+    margin-top: 36px;
+  }
+  .ds-step {
+    padding-left: 40px;
+  }
+  .ds-contact-actions .ds-btn {
+    flex: 1 1 auto;
+    justify-content: center;
+  }
+  .ds-footer-inner {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}
+
+@media (max-height: 520px) and (max-width: 1160px) {
+  /* Landscape phones: keep the hero from colliding with the nav. */
+  .ds-h1 {
+    font-size: min(calc(89 * var(--u)), 7.6vw);
+  }
+  .ds-sub {
+    margin-top: 12px;
+    font-size: 14px;
+    line-height: 1.5;
+  }
+  .ds-ctas {
+    margin-top: 16px;
+  }
+  .ds-btn-lg {
+    height: 40px;
+  }
+}
+
+/* Reduced motion: the background film is the page's content and stays, but the
+   choreography we invented (mask reveal, menu scale, smooth scrolling) is
+   collapsed. */
+@media (prefers-reduced-motion: reduce) {
+  .ds-root {
+    scroll-behavior: auto;
+  }
+  .ds-root[data-landing="pending"] .ds-nav {
+    opacity: 1;
+  }
+  .ds-root[data-landing="pending"] .ds-ln-inner,
+  .ds-root[data-landing="pending"] .ds-sub {
+    opacity: 1;
+    transform: none;
+  }
+  .ds-root[data-landing="pending"] .ds-ctas {
+    opacity: 1;
+    transform: translateX(calc(-0.75 * var(--u)));
+  }
+
+  .ds-root[data-landing="ready"] .ds-nav,
+  .ds-root[data-landing="ready"] .ds-ln-inner,
+  .ds-root[data-landing="ready"] .ds-sub,
+  .ds-root[data-landing="ready"] .ds-ctas {
+    transition: none;
+  }
+
+  .ds-menu-open {
+    animation: none;
+  }
+  .ds-card:hover {
+    transform: none;
+  }
+}

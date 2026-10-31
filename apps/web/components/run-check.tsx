@@ -14,6 +14,10 @@ export default function RunCheck() {
   const [running, setRunning] = useState(false);
   const [auto, setAuto] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  // A 403 from FastAPI here is the feature, not a bug: "the snapshot is fresh,
+  // a crawl would be redundant" is an explanation we want to show verbatim.
+  const [denied, setDenied] = useState(false);
+  const [policy, setPolicy] = useState<string | null>(null);
   const inFlight = useRef(false);
 
   const runCheck = useCallback(async () => {
@@ -21,17 +25,30 @@ export default function RunCheck() {
     inFlight.current = true;
     setRunning(true);
     setMessage(null);
+    setDenied(false);
+    setPolicy(null);
     try {
       const res = await fetch("/api/run-check", { method: "POST" });
-      const data = (await res.json()) as { ok: boolean; count?: number; error?: string };
+      const data = (await res.json()) as {
+        ok: boolean;
+        count?: number;
+        error?: string;
+        reason?: string;
+        policy?: string;
+      };
       if (!res.ok || !data.ok) {
-        setMessage(data.error ?? "Run failed");
+        // Render the policy's own words. A generic "run failed" toast would
+        // throw away the only useful part of the response.
+        setDenied(res.status === 403 || res.status === 401);
+        setPolicy(data.policy ?? null);
+        setMessage(data.reason ?? data.error ?? "Run failed");
       } else {
         setMessage(`Check complete · ${data.count ?? 0} active alert(s)`);
         // Re-run the server component so the board reflects the fresh pass.
         router.refresh();
       }
     } catch (e) {
+      setDenied(false);
       setMessage(e instanceof Error ? e.message : "Network error");
     } finally {
       setRunning(false);
@@ -48,8 +65,18 @@ export default function RunCheck() {
   return (
     <div className="flex flex-wrap items-center gap-2">
       {message && (
-        <span className="text-xs text-muted-foreground" role="status">
+        <span
+          role="status"
+          className={
+            denied
+              ? "max-w-md rounded-md border border-amber-500/40 bg-amber-500/10 px-2 py-1 text-xs leading-relaxed text-amber-800 dark:text-amber-200"
+              : "text-xs text-muted-foreground"
+          }
+        >
           {message}
+          {denied && policy && (
+            <code className="ml-1.5 font-mono text-[10px] opacity-70">{policy}</code>
+          )}
         </span>
       )}
       <Button

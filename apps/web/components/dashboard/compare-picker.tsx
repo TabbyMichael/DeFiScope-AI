@@ -113,7 +113,7 @@ export default function ComparePicker({ options }: { options: CompareOption[] })
             disabled={full}
             placeholder={
               full
-                ? `Comparison is limited to ${MAX_COMPARE} protocols — remove one to add another`
+                ? `Comparison is limited to ${MAX_COMPARE} protocols. Remove one to add another`
                 : "Search protocols to compare…"
             }
             className="pl-8"

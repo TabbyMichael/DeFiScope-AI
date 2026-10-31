@@ -16,7 +16,8 @@ from app.config import get_settings
 from app.db import SessionLocal, engine, init_db
 from app.rag.ingest import load_index, reindex
 from app.rag.service import RagService
-from app.routers import alerts, briefs, chat, dashboard, protocols
+from app.routers import alerts, auth, briefs, chat, dashboard, protocols
+from app.security.seed import seed_demo_users
 from app.services.protocols import ProtocolResearchService
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
@@ -42,6 +43,7 @@ async def lifespan(app: FastAPI):
     )
     app.state.research_service = ProtocolResearchService()
     init_db()
+    _seed_accounts()
 
     # Chat RAG service. Hydrate synchronously from any persisted chunks so the
     # endpoint can answer (offline/lexical) from the first request, then refresh
@@ -79,6 +81,23 @@ async def _warmup(state) -> None:
         raise
     except Exception as exc:  # noqa: BLE001 - never let warm-up crash the app
         logger.warning("Startup warm-up pass failed (will retry on demand): %s", exc)
+
+
+def _seed_accounts() -> None:
+    """Create the demo logins (no-op outside ``auth_mode == "demo"``).
+
+    Best-effort: a seeding failure must not stop the service from starting - an
+    operator can still log in with an account that already exists, and the
+    reason is logged rather than swallowed."""
+    session = SessionLocal()
+    try:
+        created = seed_demo_users(session)
+        if created:
+            logger.info("Seeded %d demo account(s) for auth_mode=demo", created)
+    except Exception as exc:  # noqa: BLE001 - startup must not depend on this
+        logger.warning("Demo account seeding failed: %s", type(exc).__name__)
+    finally:
+        session.close()
 
 
 def _seed_chat_index(rag_service: RagService) -> None:
@@ -128,6 +147,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(auth.router)
 app.include_router(protocols.router)
 app.include_router(briefs.router)
 app.include_router(alerts.router)
