@@ -195,7 +195,7 @@ collapse:
   omitted (and read `no_data`) rather than guessed.
 - **A gap is not a zero.** Missing key, missing mapping, missing chain and stale
   rows are four distinct statuses (`unconfigured`, `no_data`, `partial`, `stale`)
-  and all of them render as an em dash plus a reason. Nothing in this block can
+  and all of them render as `n/a` plus a reason. Nothing in this block can
   silently become `0`.
 
 ### Why the seven risk indicators do not read these numbers

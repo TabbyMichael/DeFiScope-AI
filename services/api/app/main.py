@@ -16,7 +16,7 @@ from app.config import get_settings
 from app.db import SessionLocal, engine, init_db
 from app.rag.ingest import load_index, reindex
 from app.rag.service import RagService
-from app.routers import alerts, auth, briefs, catalog, chat, dashboard, protocols
+from app.routers import alerts, auth, briefs, catalog, chat, dashboard, protocols, status
 from app.security.seed import seed_demo_users
 from app.services import cache
 from app.services import catalog as catalog_service
@@ -56,9 +56,12 @@ async def lifespan(app: FastAPI):
     _seed_chat_index(app.state.rag_service)
 
     scheduler = AsyncIOScheduler()
-    scheduler.add_job(lambda: alerts_alert_run(app.state), "interval", minutes=30, id="monitor")
+    interval = get_settings().monitor_interval_minutes
+    scheduler.add_job(
+        lambda: alerts_alert_run(app.state), "interval", minutes=interval, id="monitor"
+    )
     scheduler.start()
-    logger.info("Scheduler started (monitoring every 30 min)")
+    logger.info("Scheduler started (monitoring every %d min)", interval)
 
     # Warm the DB so the DB-first dashboard has data on first load, but do NOT
     # await it in the lifespan: the pass fans out to sequential DefiLlama HTTP
@@ -210,6 +213,7 @@ app.include_router(briefs.router)
 app.include_router(alerts.router)
 app.include_router(dashboard.router)
 app.include_router(chat.router)
+app.include_router(status.router)
 
 
 def _db_status() -> str:

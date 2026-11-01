@@ -1,9 +1,13 @@
 import { DeFiScopeLanding } from "@/components/landing/defiscope-landing";
 
 /**
- * The marketing page is fully static — no cookies, no API reads — so it needs no
- * Suspense boundary and can be prerendered at build time. `cacheComponents` is
- * happy with it for exactly that reason.
+ * The landing shell is static; only its live coverage band reads the backend.
+ *
+ * That split is what `cacheComponents` wants: the hero, the chrome and every
+ * explanatory section prerender to static HTML, while the one data-shaped region
+ * (the numbers at `/api/status`) streams under a `Suspense` boundary inside
+ * `DeFiScopeLanding`. A cold or unreachable API can therefore never blank the
+ * page or fail the build: the suspended band simply renders its honest `n/a`.
  */
 export default function WelcomePage() {
   return <DeFiScopeLanding />;

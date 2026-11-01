@@ -22,30 +22,101 @@
 .ds-root {
   --u: min(calc(100vw / 1280), calc(100dvh / 760));
 
-  --ink: #ffffff;
-  --ink-muted: #ededed;
+  /* --------------------------------------------------------------- channels
+     Every colour in this sheet is one of six channel triplets plus an alpha,
+     written as `rgb(var(--x-rgb) / 0.08)`. That is what makes a second theme a
+     re-declaration of a dozen values instead of a rewrite of sixty rules, and
+     it is why the values below read as numbers rather than as hex. */
+  --fg-rgb: 255 255 255; /* anything drawn on top of the page */
+  --bg-rgb: 5 8 7; /* the page itself */
+  --bg-raise-rgb: 8 13 11; /* an alternating section */
+  --accent-rgb: 52 211 153; /* emerald, the brand */
+  --glow-rgb: 16 185 129; /* the deeper emerald, used for washes */
+  --scrim-rgb: 3 8 6; /* the hero's contrast scrim */
+
+  /* The floor under the faint rungs of the text ladder, zero by default. The
+     ladder was cut against black, where even 40% white holds its own; the same
+     alphas on paper fall below AA, so the light theme raises a floor and the
+     rules stay one expression instead of two. */
+  --a-min: 0;
+
+  --ink: rgb(var(--fg-rgb));
+  --ink-soft: rgb(var(--fg-rgb) / 0.96);
+  --ink-muted: rgb(var(--fg-rgb) / 0.93);
   --panel: #181818;
-  --white-btn: #fdfdfd;
-  --btn-ink: #050505;
+  --panel-hover: #232323;
+  --cta-bg: #fdfdfd;
+  --cta-ink: #050505;
+  --cta-bg-hover: #f2fff9;
   --glass-fill: rgba(0, 0, 0, 0.78);
-  --glass-line: rgba(255, 255, 255, 0.09);
+  --glass-fill-strong: rgba(0, 0, 0, 0.66);
+  --glass-line: rgb(var(--fg-rgb) / 0.09);
+  --ghost-ink: #d9d9d9;
 
   /* Green identity. */
-  --accent: #34d399;
-  --accent-soft: rgba(52, 211, 153, 0.14);
-  --accent-line: rgba(52, 211, 153, 0.34);
-  --glow: rgba(16, 185, 129, 0.45);
+  --accent: rgb(var(--accent-rgb));
+  --accent-soft: rgb(var(--accent-rgb) / 0.14);
+  --accent-line: rgb(var(--accent-rgb) / 0.34);
+  --accent-ink: #04130d; /* text drawn on top of the accent */
+  --glow: rgb(var(--glow-rgb) / 0.45);
   --video-hue: -118deg; /* violet (~275°) -> emerald (~157°) */
+  /* The film's whole look lives in one filter list, because a light theme needs
+     a different one rather than a different asset. Pulled just off full
+     saturation: emerald at 1.2 goes radioactive on an OLED panel. */
+  --video-tint: hue-rotate(var(--video-hue)) saturate(0.95) brightness(0.97)
+    contrast(1.02);
+  /* How strongly the globe is allowed to read behind a document's headline,
+     the ellipse that cuts it off before the copy starts, and the scrim the veil
+     puts back over it. */
+  --film-power: 0.62;
+  --film-scrim: 0.5;
+  /* Extra weight the hero's contrast scrim puts on. Zero in the dark theme, so
+     the landing's grading stays exactly as approved; the light theme raises it
+     because there the globe's line work turns dark, the same value as the type.
+     Used through calc() so a `0` leaves the original alpha untouched. */
+  --tint-boost: 0;
+  --film-mask: radial-gradient(
+    76% 70% at 50% 32%,
+    rgb(0 0 0) 26%,
+    rgb(0 0 0 / 0.5) 58%,
+    rgb(0 0 0 / 0) 82%
+  );
+
+  /* Status roles: the four risk bands and the two "do not trust this" tints. */
+  --ok: #34d399;
+  --warn: #fbbf24;
+  --hot: #fb923c;
+  --bad: #f87171;
+  --bad-soft: #e8798a;
+  --warn-deep: #f0a35f;
+
+  /* Translucent dark plates, which are not the same thing as the page colour. */
+  --nav-glass: rgba(4, 10, 8, 0.72);
+  --menu-glass: rgba(8, 16, 13, 0.94);
+  --cell-glass: rgba(8, 13, 11, 0.72);
+
+  /* The code plate is a terminal, and a terminal keeps its own palette. */
+  --code-bg: #070b09;
+  --code-ink: #cfe3d9;
+  --code-key: #9fb8ad;
+  --code-str: #e6f5ee;
+  --plate-ink: #b9e6d1;
+
+  --film-backdrop: #000;
 
   --dx: 8.5; /* hero block optical offset, solved against the reference render */
   --dy: 13.1;
 
-  --night: #050807;
-  --night-raise: #080d0b;
+  --night: rgb(var(--bg-rgb));
+  --night-raise: rgb(var(--bg-raise-rgb));
 
   position: relative;
   isolation: isolate;
   width: 100%;
+  /* The default scheme, declared here so a visitor who has never touched the
+     switch gets dark scrollbars and dark form controls rather than a light
+     browser chrome behind a black page. `html.light .ds-root` below flips it. */
+  color-scheme: dark;
   background: var(--night);
   color: var(--ink);
   font-family: var(--font-display), "Plus Jakarta Sans", -apple-system,
@@ -83,7 +154,7 @@
   padding: 10px 18px;
   border-radius: 999px;
   background: var(--accent);
-  color: #04130d;
+  color: var(--accent-ink);
   font-size: 13px;
   font-weight: 600;
   text-decoration: none;
@@ -102,7 +173,7 @@
   width: 100%;
   height: 100dvh;
   overflow: hidden;
-  background: #000;
+  background: var(--film-backdrop);
 }
 @supports not (height: 100dvh) {
   .ds-hero {
@@ -119,7 +190,7 @@
   transform: translate(-50%, -50%);
   width: max(100vw, calc(100dvh * 1.6));
   height: max(62.5vw, 100dvh);
-  background-color: #000;
+  background-color: var(--film-backdrop);
 }
 @supports not (height: 100dvh) {
   .ds-bg {
@@ -136,15 +207,13 @@
   height: 100%;
   object-fit: cover;
   object-position: 51% 8%; /* framing inherited from the still it replaces */
-  background-color: #000;
+  background-color: var(--film-backdrop);
   pointer-events: none;
   opacity: 0;
   transition: opacity 0.9s linear;
-  /* The one change that turns a violet globe into a green one, with no
-     re-encode and no second asset to ship. Pulled just off full saturation:
-     emerald at 1.2 goes radioactive on an OLED panel. */
-  filter: hue-rotate(var(--video-hue)) saturate(0.95) brightness(0.97)
-    contrast(1.02);
+  /* One token, so a second theme can re-grade the footage instead of
+     re-encoding it. See `--video-tint`. */
+  filter: var(--video-tint);
 }
 .ds-is-active {
   opacity: 1;
@@ -162,21 +231,21 @@
        exactly where the type sits, and white on that green is roughly 3:1. */
     radial-gradient(
       46% 30% at 50% 46%,
-      rgba(3, 8, 6, 0.38),
-      rgba(3, 8, 6, 0) 72%
+      rgb(var(--scrim-rgb) / calc(0.38 + var(--tint-boost))),
+      rgb(var(--scrim-rgb) / 0) 72%
     ),
     radial-gradient(
       58% 46% at 50% 44%,
-      rgba(16, 185, 129, 0.14),
-      rgba(16, 185, 129, 0) 70%
+      rgb(var(--glow-rgb) / 0.14),
+      rgb(var(--glow-rgb) / 0) 70%
     ),
     linear-gradient(
       to bottom,
-      rgba(3, 8, 6, 0.55) 0%,
-      rgba(3, 8, 6, 0.1) 22%,
-      rgba(3, 8, 6, 0) 46%,
-      rgba(3, 8, 6, 0.34) 74%,
-      rgba(5, 8, 7, 0.92) 100%
+      rgb(var(--scrim-rgb) / calc(0.55 + var(--tint-boost))) 0%,
+      rgb(var(--scrim-rgb) / 0.1) 22%,
+      rgb(var(--scrim-rgb) / 0) 46%,
+      rgb(var(--scrim-rgb) / 0.34) 74%,
+      rgb(var(--bg-rgb) / 0.92) 100%
     );
 }
 
@@ -201,8 +270,8 @@
     backdrop-filter 0.25s ease;
 }
 .ds-nav-stuck {
-  background: rgba(4, 10, 8, 0.72);
-  border-bottom-color: rgba(255, 255, 255, 0.07);
+  background: var(--nav-glass);
+  border-bottom-color: rgb(var(--fg-rgb) / 0.07);
   -webkit-backdrop-filter: blur(16px) saturate(140%);
   backdrop-filter: blur(16px) saturate(140%);
 }
@@ -225,7 +294,7 @@
   height: calc(7 * var(--u));
   border-radius: 999px;
   background: var(--accent);
-  box-shadow: 0 0 0 calc(3 * var(--u)) rgba(52, 211, 153, 0.16);
+  box-shadow: 0 0 0 calc(3 * var(--u)) rgb(var(--accent-rgb) / 0.16);
 }
 /* The product mark is "DeFiScope AI" — the suffix rides small and green so the
    two halves read as one wordmark rather than two words. */
@@ -285,7 +354,7 @@
   padding: 0 calc(12.9 * var(--u));
   border-radius: calc(14 * var(--u));
   background: var(--panel);
-  color: #e8e8e8;
+  color: rgb(var(--fg-rgb) / 0.91);
   font-size: calc(11.5 * var(--u));
   font-weight: 500;
   letter-spacing: calc(-0.15 * var(--u));
@@ -294,8 +363,8 @@
     color 0.18s ease;
 }
 .ds-btn-login:hover {
-  background: #232323;
-  color: #fff;
+  background: var(--panel-hover);
+  color: var(--ink);
 }
 
 .ds-btn-nav-start {
@@ -304,8 +373,8 @@
   padding-left: calc(13.5 * var(--u));
   padding-right: calc(14.5 * var(--u));
   border-radius: calc(14 * var(--u));
-  background: var(--white-btn);
-  color: var(--btn-ink);
+  background: var(--cta-bg);
+  color: var(--cta-ink);
   font-size: calc(11.1 * var(--u));
   font-weight: 500;
   transition:
@@ -313,8 +382,8 @@
     box-shadow 0.18s ease;
 }
 .ds-btn-nav-start:hover {
-  background: #f2fff9;
-  box-shadow: 0 0 0 1px rgba(52, 211, 153, 0.4);
+  background: var(--cta-bg-hover);
+  box-shadow: 0 0 0 1px rgb(var(--accent-rgb) / 0.4);
 }
 .ds-btn-nav-start .ds-arrow {
   width: calc(11.5 * var(--u));
@@ -341,7 +410,7 @@
   width: 16px;
   height: 1.5px;
   border-radius: 2px;
-  background: #ededed;
+  background: var(--ink-muted);
   transition: background 0.2s ease;
 }
 .ds-burger-bars::before,
@@ -352,7 +421,7 @@
   width: 16px;
   height: 1.5px;
   border-radius: 2px;
-  background: #ededed;
+  background: var(--ink-muted);
   transition: transform 0.2s ease;
 }
 .ds-burger-bars::before {
@@ -414,7 +483,7 @@
 
 .ds-sub {
   margin: calc(16.1 * var(--u)) 0 0;
-  color: #f6f6f6;
+  color: var(--ink-soft);
   font-size: calc(17.4 * var(--u));
   font-weight: 300;
   line-height: calc(27 * var(--u));
@@ -441,26 +510,26 @@
 .ds-btn-primary {
   padding-left: calc(18.2 * var(--u));
   padding-right: calc(19.2 * var(--u));
-  background: var(--white-btn);
-  color: var(--btn-ink);
+  background: var(--cta-bg);
+  color: var(--cta-ink);
   box-shadow:
-    0 0 0 1px rgba(255, 255, 255, 0.08),
+    0 0 0 1px rgb(var(--fg-rgb) / 0.08),
     0 18px 46px -22px var(--glow);
   transition:
     background 0.18s ease,
     box-shadow 0.18s ease;
 }
 .ds-btn-primary:hover {
-  background: #f2fff9;
+  background: var(--cta-bg-hover);
   box-shadow:
-    0 0 0 1px rgba(52, 211, 153, 0.42),
+    0 0 0 1px rgb(var(--accent-rgb) / 0.42),
     0 22px 54px -20px var(--glow);
 }
 .ds-btn-ghost {
   padding: 0 calc(17.4 * var(--u));
   border: 1px solid var(--glass-line);
   background: var(--glass-fill);
-  color: #d9d9d9;
+  color: var(--ghost-ink);
   -webkit-backdrop-filter: blur(2px);
   backdrop-filter: blur(2px);
   transition:
@@ -469,9 +538,9 @@
     color 0.18s ease;
 }
 .ds-btn-ghost:hover {
-  background: rgba(0, 0, 0, 0.66);
+  background: var(--glass-fill-strong);
   border-color: var(--accent-line);
-  color: #fff;
+  color: var(--ink);
 }
 .ds-btn-lg .ds-arrow {
   width: calc(13 * var(--u));
@@ -514,8 +583,8 @@
     color 0.16s ease;
 }
 .ds-menu a:hover {
-  background: rgba(255, 255, 255, 0.06);
-  color: #fff;
+  background: rgb(var(--fg-rgb) / 0.06);
+  color: var(--ink);
 }
 
 .ds-divider {
@@ -534,14 +603,14 @@
   margin-top: 8px;
   padding: 13px 14px;
   border-radius: 12px;
-  background: var(--white-btn);
-  color: var(--btn-ink) !important;
+  background: var(--cta-bg);
+  color: var(--cta-ink) !important;
   font-weight: 600;
   white-space: nowrap;
 }
 .ds-menu .ds-m-start:hover {
-  background: #f2fff9;
-  color: var(--btn-ink) !important;
+  background: var(--cta-bg-hover);
+  color: var(--cta-ink) !important;
 }
 .ds-menu .ds-m-start .ds-arrow {
   width: 13px;
@@ -605,7 +674,7 @@
 .ds-section {
   position: relative;
   padding: clamp(64px, 8.5vw, 124px) clamp(20px, 4vw, 48px);
-  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  border-top: 1px solid rgb(var(--fg-rgb) / 0.06);
   background: var(--night);
   scroll-margin-top: 88px;
 }
@@ -613,8 +682,8 @@
   background:
     radial-gradient(
       90% 60% at 50% 0%,
-      rgba(16, 185, 129, 0.07),
-      rgba(16, 185, 129, 0) 60%
+      rgb(var(--glow-rgb) / 0.07),
+      rgb(var(--glow-rgb) / 0) 60%
     ),
     var(--night-raise);
 }
@@ -648,7 +717,7 @@
 .ds-lede {
   max-width: 56ch;
   margin: 20px 0 0;
-  color: rgba(255, 255, 255, 0.62);
+  color: rgb(var(--fg-rgb) / 0.62);
   font-size: clamp(15px, 1.25vw, 17px);
   font-weight: 300;
   line-height: 1.65;
@@ -666,12 +735,12 @@
 .ds-card {
   position: relative;
   padding: 24px 22px 26px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid rgb(var(--fg-rgb) / 0.08);
   border-radius: 18px;
   background: linear-gradient(
     180deg,
-    rgba(255, 255, 255, 0.05),
-    rgba(255, 255, 255, 0.012)
+    rgb(var(--fg-rgb) / 0.05),
+    rgb(var(--fg-rgb) / 0.012)
   );
   transition:
     border-color 0.2s ease,
@@ -699,7 +768,7 @@
 }
 .ds-card-text {
   margin: 0;
-  color: rgba(255, 255, 255, 0.58);
+  color: rgb(var(--fg-rgb) / max(var(--a-min), 0.58));
   font-size: 14px;
   font-weight: 300;
   line-height: 1.6;
@@ -747,8 +816,8 @@
   width: 1px;
   background: linear-gradient(
     to bottom,
-    rgba(52, 211, 153, 0.3),
-    rgba(255, 255, 255, 0.06)
+    rgb(var(--accent-rgb) / 0.3),
+    rgb(var(--fg-rgb) / 0.06)
   );
 }
 .ds-step:last-child::after {
@@ -762,7 +831,7 @@
 }
 .ds-step-text {
   margin: 0;
-  color: rgba(255, 255, 255, 0.58);
+  color: rgb(var(--fg-rgb) / max(var(--a-min), 0.58));
   font-size: 14.5px;
   font-weight: 300;
   line-height: 1.65;
@@ -772,18 +841,18 @@
   margin: 0;
   padding: 20px 22px;
   overflow-x: auto;
-  border: 1px solid rgba(255, 255, 255, 0.09);
+  border: 1px solid rgb(var(--fg-rgb) / 0.09);
   border-radius: 16px;
   background:
-    linear-gradient(180deg, rgba(52, 211, 153, 0.06), rgba(0, 0, 0, 0)),
-    #070b09;
-  color: #cfe3d9;
+    linear-gradient(180deg, rgb(var(--accent-rgb) / 0.06), rgba(0, 0, 0, 0)),
+    var(--code-bg);
+  color: var(--code-ink);
   font-family: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo,
     monospace;
   font-size: 12.5px;
   line-height: 1.9;
   tab-size: 2;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  box-shadow: inset 0 1px 0 rgb(var(--fg-rgb) / 0.04);
 }
 .ds-code-line {
   display: block;
@@ -793,10 +862,10 @@
   color: var(--accent);
 }
 .ds-code-key {
-  color: #9fb8ad;
+  color: var(--code-key);
 }
 .ds-code-str {
-  color: #e6f5ee;
+  color: var(--code-str);
 }
 
 /* --- closing --- */
@@ -805,8 +874,8 @@
   background:
     radial-gradient(
       70% 80% at 50% 0%,
-      rgba(16, 185, 129, 0.16),
-      rgba(16, 185, 129, 0) 62%
+      rgb(var(--glow-rgb) / 0.16),
+      rgb(var(--glow-rgb) / 0) 62%
     ),
     var(--night);
 }
@@ -824,7 +893,7 @@
 .ds-contact-text {
   max-width: 46ch;
   margin: 20px auto 0;
-  color: rgba(255, 255, 255, 0.6);
+  color: rgb(var(--fg-rgb) / 0.6);
   font-size: clamp(15px, 1.3vw, 17px);
   font-weight: 300;
   line-height: 1.65;
@@ -848,7 +917,7 @@
 }
 .ds-contact-actions .ds-btn-primary {
   box-shadow:
-    0 0 0 1px rgba(255, 255, 255, 0.08),
+    0 0 0 1px rgb(var(--fg-rgb) / 0.08),
     0 24px 60px -24px var(--glow);
 }
 .ds-contact-actions .ds-arrow {
@@ -857,7 +926,7 @@
 }
 
 .ds-footer {
-  border-top: 1px solid rgba(255, 255, 255, 0.07);
+  border-top: 1px solid rgb(var(--fg-rgb) / 0.07);
   background: var(--night);
   padding: 26px clamp(20px, 4vw, 48px) 34px;
 }
@@ -869,7 +938,7 @@
   gap: 14px;
   max-width: 1160px;
   margin: 0 auto;
-  color: rgba(255, 255, 255, 0.45);
+  color: rgb(var(--fg-rgb) / max(var(--a-min), 0.45));
   font-size: 13px;
   font-weight: 300;
 }
@@ -885,6 +954,1366 @@
 }
 .ds-footer-links a:hover {
   color: var(--accent);
+}
+
+/* ============================================================================
+   About page: the document layer
+   ==========================================================================
+   Everything above is a hero solved against one 1280 x 760 reference render,
+   and `--u` is the unit that falls out of dividing by it. A scrolling document
+   has no such reference: there is no fixed height to divide by, and a `dvh`
+   term would shrink the body copy on a short laptop and stretch it on a tall
+   one. So every class below is the same design language measured in px and
+   `clamp()`, exactly as the below-the-fold sections already are.
+
+   Two shared ideas instead of per-block decisions:
+   - `--measure` is one line length. In a 1160px column a paragraph is
+     unreadable, so prose, lists and notes all inherit the same 68ch.
+   - The card, step and code recipes above are reused rather than re-invented.
+     New classes here are only the ones a document needs and a hero did not:
+     tables, a pull quote, a chip index, a three-state roadmap and an accordion.
+   ========================================================================== */
+
+.ds-page-hero,
+.ds-section {
+  --measure: 68ch;
+}
+
+/* ------------------------------------------------------------------ page hero
+   The same composition as `.ds-hero` (background, eyebrow, two masked lines,
+   sub, CTAs) but in flow instead of pinned to a film: it has to clear a fixed
+   nav and then hand over to the document, so it is padded rather than centred
+   against a viewport height. */
+.ds-page-hero {
+  position: relative;
+  overflow: hidden;
+  padding: clamp(122px, 17vh, 196px) clamp(20px, 4vw, 48px)
+    clamp(64px, 8vw, 104px);
+  border-top: 0;
+  text-align: center;
+}
+
+/* The static half of the hero: two washes and the page's own blend into the
+   document. It sits under the film below, and keeps working when the film never
+   arrives (throttled connection, no decode budget) — the copy stays legible
+   either way, which is the whole reason the two layers are separate. */
+.ds-page-bg {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(
+      62% 54% at 50% -6%,
+      rgb(var(--glow-rgb) / 0.2),
+      rgb(var(--glow-rgb) / 0) 64%
+    ),
+    radial-gradient(
+      40% 34% at 82% 8%,
+      rgb(var(--accent-rgb) / 0.09),
+      rgb(var(--accent-rgb) / 0) 70%
+    ),
+    linear-gradient(
+      to bottom,
+      var(--night-raise) 0%,
+      var(--night) 78%,
+      var(--night) 100%
+    );
+}
+/* One rule of structure: a 96px column grid, faded in at the top and gone
+   before the copy starts, so the hero reads as engineered rather than painted. */
+.ds-page-bg::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image: linear-gradient(
+    to right,
+    rgb(var(--fg-rgb) / 0.035) 1px,
+    transparent 1px
+  );
+  background-size: 96px 100%;
+  -webkit-mask-image: linear-gradient(to bottom, rgba(0, 0, 0, 0.9), transparent);
+  mask-image: linear-gradient(to bottom, rgba(0, 0, 0, 0.9), transparent);
+}
+
+/* --------------------------------------------------------------- page film
+   The landing's rotating globe, brought into a document. Same asset, same
+   grade, but a page hero is not a viewport: the frame is the section, so the
+   box stops being viewport-sized and fills the hero instead, the crop is moved
+   onto the globe rather than onto the starfield above it, and the ellipse in
+   `--film-mask` fades it out before the copy begins. It sits behind a tint that
+   buys the headline its contrast, exactly as `.ds-tint` does on the landing. */
+.ds-page-film {
+  inset: 0;
+  width: auto;
+  height: auto;
+  transform: none;
+  z-index: 1;
+  /* No black plate under the washes: the page's own atmosphere has to read
+     through the parts of the frame that are only starfield. */
+  background-color: transparent;
+  opacity: var(--film-power);
+  -webkit-mask-image: var(--film-mask);
+  mask-image: var(--film-mask);
+}
+.ds-page-film .ds-bg-video {
+  /* The source frames the globe slightly above centre; the default 8% is tuned
+     for a full-viewport crop and would clip its lower half here. */
+  object-position: 51% 42%;
+}
+
+/* The veil. A scrim under the headline, then a fade to the page so the film
+   hands over to the document instead of ending in a line. */
+.ds-page-tint {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+  background:
+    radial-gradient(
+      52% 40% at 50% 42%,
+      rgb(var(--scrim-rgb) / var(--film-scrim)),
+      rgb(var(--scrim-rgb) / 0) 74%
+    ),
+    linear-gradient(
+      to bottom,
+      rgb(var(--bg-rgb) / 0) 34%,
+      rgb(var(--bg-rgb) / 0.55) 68%,
+      var(--bg-rgb) 92%
+    );
+}
+
+.ds-page-hero-inner {
+  position: relative;
+  z-index: 3;
+  max-width: 860px;
+  margin: 0 auto;
+}
+.ds-page-hero .ds-eyebrow {
+  justify-content: center;
+}
+/* The hero `--u` sizing is tuned for a 1280px film. On a document the same 89u
+   runs into the edge of a 1440px window without earning the space, so the
+   headline is solved against the column instead. */
+.ds-page-hero .ds-h1 {
+  max-width: 17ch;
+  margin: 0 auto;
+  font-size: clamp(40px, 5.4vw, 76px);
+  line-height: 1.03;
+  letter-spacing: -0.034em;
+}
+.ds-page-hero .ds-sub {
+  max-width: 58ch;
+  margin: 22px auto 0;
+  font-size: clamp(16px, 1.5vw, 19px);
+  line-height: 1.62;
+  color: rgb(var(--fg-rgb) / 0.68);
+}
+.ds-page-hero .ds-ctas {
+  margin-top: 34px;
+  gap: 10px;
+  transform: none;
+}
+.ds-page-hero .ds-btn-lg {
+  height: 46px;
+  padding: 0 22px;
+  border-radius: 23px;
+  gap: 10px;
+  font-size: 14.5px;
+}
+.ds-page-hero .ds-btn-lg .ds-arrow {
+  width: 14px;
+  height: 11.5px;
+}
+
+/* --- chip index: a long page needs its table of contents in the first screen */
+.ds-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: center;
+  max-width: 720px;
+  margin: clamp(38px, 5vh, 58px) auto 0;
+  padding: 0;
+}
+.ds-chips a {
+  padding: 7px 14px;
+  border: 1px solid rgb(var(--fg-rgb) / 0.1);
+  border-radius: 999px;
+  background: rgb(var(--fg-rgb) / 0.03);
+  color: rgb(var(--fg-rgb) / 0.62);
+  font-size: 12.5px;
+  font-weight: 500;
+  letter-spacing: -0.005em;
+  text-decoration: none;
+  transition:
+    border-color 0.16s ease,
+    background 0.16s ease,
+    color 0.16s ease;
+}
+.ds-chips a:hover {
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
+  color: var(--ink);
+}
+
+/* ------------------------------------------------------------------- typography
+   The three text roles a document needs that a hero never did. */
+.ds-subhead {
+  max-width: var(--measure);
+  margin: clamp(52px, 6vw, 76px) 0 0;
+  font-size: clamp(19px, 1.9vw, 24px);
+  font-weight: 600;
+  letter-spacing: -0.019em;
+  line-height: 1.28;
+}
+.ds-subhead::before {
+  content: "";
+  display: block;
+  width: 26px;
+  height: 2px;
+  margin-bottom: 14px;
+  border-radius: 2px;
+  background: var(--accent);
+}
+
+.ds-paragraph,
+.ds-prose p {
+  max-width: var(--measure);
+  margin: 18px 0 0;
+  color: rgb(var(--fg-rgb) / 0.62);
+  font-size: clamp(15px, 1.25vw, 16.5px);
+  font-weight: 300;
+  line-height: 1.72;
+}
+.ds-prose p + p {
+  margin-top: 14px;
+}
+/* Body copy that carries a literal: the identifier keeps its own face and a
+   faint plate so it survives a scan of the paragraph without shouting. */
+.ds-inline-code {
+  padding: 0.14em 0.42em;
+  border: 1px solid rgb(var(--fg-rgb) / 0.09);
+  border-radius: 6px;
+  background: rgb(var(--accent-rgb) / 0.07);
+  color: var(--plate-ink);
+  font-family: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo,
+    monospace;
+  font-size: 0.86em;
+  font-weight: 400;
+  letter-spacing: 0;
+  white-space: nowrap;
+}
+.ds-strong {
+  color: var(--accent);
+  font-weight: 600;
+  font-family: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo,
+    monospace;
+  letter-spacing: 0.01em;
+}
+/* A text link that sits inside a sentence, carrying a small trailing arrow.
+   Baseline-aligned so the glyph rides on the text, not above it. */
+.ds-inline-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-left: 6px;
+  color: var(--accent);
+  font-weight: 500;
+  text-decoration: none;
+  border-bottom: 1px solid var(--accent-line);
+  transition:
+    border-color 0.15s ease,
+    color 0.15s ease;
+}
+.ds-inline-link:hover {
+  border-bottom-color: var(--accent);
+  color: var(--ink);
+}
+.ds-inline-link > svg {
+  flex: 0 0 auto;
+}
+/* The one line under the coverage band naming the observation time. */
+.ds-coverage-meta {
+  margin: 18px 0 0;
+  color: rgb(var(--fg-rgb) / max(var(--a-min), 0.55));
+  font-size: 13px;
+}
+.ds-h2-sm {
+  max-width: 30ch;
+  font-size: clamp(24px, 2.7vw, 34px);
+  line-height: 1.14;
+}
+
+/* --- pull quote: the one sentence on the page allowed to be large --- */
+.ds-pull {
+  position: relative;
+  max-width: 44ch;
+  margin: clamp(44px, 5vw, 64px) 0 0;
+  padding: 0 0 0 26px;
+  border-left: 2px solid var(--accent-line);
+}
+.ds-pull-icon {
+  display: block;
+  width: 20px;
+  height: 20px;
+  margin-bottom: 14px;
+  color: var(--accent);
+  opacity: 0.7;
+}
+.ds-pull blockquote {
+  margin: 0;
+  color: var(--ink);
+  font-size: clamp(20px, 2.3vw, 27px);
+  font-weight: 400;
+  line-height: 1.34;
+  letter-spacing: -0.021em;
+}
+.ds-pull figcaption {
+  margin-top: 14px;
+  color: rgb(var(--fg-rgb) / max(var(--a-min), 0.48));
+  font-size: 13.5px;
+  font-weight: 300;
+  line-height: 1.6;
+}
+
+/* ------------------------------------------------------------------- stats band
+   Eight claims that are properties of the code, set as claims rather than as a
+   table: the number carries the weight and the note is allowed to be small. */
+/* The band itself earns a second, lower light source: the grid sits under a
+   heading, and a top wash alone would leave the last row of cells floating. */
+.ds-stats-band {
+  background:
+    radial-gradient(
+      80% 50% at 50% 0%,
+      rgb(var(--glow-rgb) / 0.08),
+      rgb(var(--glow-rgb) / 0) 62%
+    ),
+    radial-gradient(
+      70% 40% at 50% 108%,
+      rgb(var(--glow-rgb) / 0.06),
+      rgb(var(--glow-rgb) / 0) 60%
+    ),
+    var(--night-raise);
+}
+.ds-stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1px;
+  margin: 46px 0 0;
+  padding: 0;
+  /* The gap becomes a hairline grid: one background, eight cells punched
+     through it, so the rules cannot drift out of alignment with the cells. */
+  background: rgb(var(--fg-rgb) / 0.07);
+  border: 1px solid rgb(var(--fg-rgb) / 0.07);
+  border-radius: 18px;
+  overflow: hidden;
+}
+.ds-stat {
+  padding: 24px 22px 26px;
+  background: var(--cell-glass);
+}
+.ds-stat-num {
+  margin: 0;
+  color: var(--accent);
+  font-size: clamp(30px, 3.4vw, 42px);
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: -0.03em;
+  font-variant-numeric: tabular-nums;
+}
+.ds-stat-label {
+  margin: 0;
+  color: var(--ink);
+  font-size: 13.5px;
+  font-weight: 600;
+  letter-spacing: -0.008em;
+}
+.ds-stat-note {
+  margin: 8px 0 0;
+  color: rgb(var(--fg-rgb) / max(var(--a-min), 0.5));
+  font-size: 12.5px;
+  font-weight: 300;
+  line-height: 1.55;
+}
+
+/* --------------------------------------------------------------- step columns
+   The pipeline is six stages, not three: two columns of three, so the reader
+   sees the whole path at once instead of scrolling a timeline. */
+.ds-steps-2 {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 clamp(32px, 4vw, 56px);
+  margin-top: 44px;
+}
+.ds-steps-2 .ds-step {
+  padding-bottom: 30px;
+}
+/* The rail on the last item of the first column would point at nothing. */
+.ds-steps-2 .ds-step:nth-child(2n)::after {
+  display: none;
+}
+
+/* --------------------------------------------------------------------- tables
+   A methodology is a table or it is a vibe. These scroll horizontally rather
+   than compress a sentence into 90px, because the whole value of the matrix is
+   that each limitation gets a full column. */
+.ds-table-wrap {
+  margin-top: 34px;
+  overflow-x: auto;
+  border: 1px solid rgb(var(--fg-rgb) / 0.08);
+  border-radius: 18px;
+  background: linear-gradient(
+    180deg,
+    rgb(var(--fg-rgb) / 0.04),
+    rgb(var(--fg-rgb) / 0.01)
+  );
+  -webkit-overflow-scrolling: touch;
+}
+/* A focusable region needs to look focusable; the root outline is a pill, which
+   is wrong for a rectangle this size. */
+.ds-table-wrap:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+  border-radius: 18px;
+}
+.ds-table {
+  width: 100%;
+  min-width: 760px;
+  border-collapse: collapse;
+  text-align: left;
+  font-size: 14px;
+}
+.ds-table-2 {
+  min-width: 600px;
+}
+.ds-table thead th {
+  padding: 16px 20px;
+  border-bottom: 1px solid rgb(var(--fg-rgb) / 0.1);
+  color: rgb(var(--fg-rgb) / max(var(--a-min), 0.46));
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  vertical-align: bottom;
+}
+.ds-table tbody tr + tr th,
+.ds-table tbody tr + tr td {
+  border-top: 1px solid rgb(var(--fg-rgb) / 0.06);
+}
+.ds-table tbody tr {
+  transition: background 0.16s ease;
+}
+.ds-table tbody tr:hover {
+  background: rgb(var(--accent-rgb) / 0.04);
+}
+.ds-table th[scope="row"],
+.ds-table td {
+  padding: 17px 20px;
+  font-weight: 300;
+  line-height: 1.6;
+  vertical-align: top;
+}
+.ds-table th[scope="row"] {
+  color: var(--ink);
+  font-size: 14.5px;
+  font-weight: 600;
+  letter-spacing: -0.011em;
+  white-space: nowrap;
+}
+.ds-table td {
+  color: rgb(var(--fg-rgb) / 0.6);
+}
+.ds-td-weight {
+  color: var(--accent) !important;
+  font-weight: 500 !important;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.ds-td-anchor {
+  color: rgb(var(--fg-rgb) / 0.72) !important;
+  white-space: nowrap;
+}
+/* The column the exercise is actually for: it needs to be readable as prose, not
+   squeezed as a footnote. */
+.ds-td-cannot {
+  min-width: 34ch;
+  max-width: 54ch;
+  color: rgb(var(--fg-rgb) / max(var(--a-min), 0.55)) !important;
+}
+
+/* --- risk bands: the four labels, in the colours the product already uses --- */
+.ds-bands {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 26px;
+}
+.ds-band {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  padding: 8px 15px 8px 12px;
+  border: 1px solid rgb(var(--fg-rgb) / 0.09);
+  border-radius: 999px;
+  background: rgb(var(--fg-rgb) / 0.03);
+}
+.ds-band-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: currentColor;
+  box-shadow: 0 0 0 3px color-mix(in oklab, currentColor 22%, transparent);
+}
+.ds-band-name {
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: -0.008em;
+}
+.ds-band-range {
+  color: rgb(var(--fg-rgb) / max(var(--a-min), 0.44));
+  font-size: 12px;
+  font-weight: 300;
+  font-variant-numeric: tabular-nums;
+}
+.ds-band-low {
+  color: var(--ok);
+}
+.ds-band-moderate {
+  color: var(--warn);
+}
+.ds-band-elevated {
+  color: var(--hot);
+}
+.ds-band-high {
+  color: var(--bad);
+}
+
+/* --- note: a paragraph that is not allowed to look like the body copy --- */
+.ds-note {
+  max-width: var(--measure);
+  margin: clamp(38px, 4.5vw, 54px) 0 0;
+  padding: 18px 20px;
+  border: 1px solid rgb(var(--accent-rgb) / 0.22);
+  border-left-width: 2px;
+  border-left-color: var(--accent);
+  border-radius: 14px;
+  background: rgb(var(--glow-rgb) / 0.05);
+  color: rgb(var(--fg-rgb) / 0.64);
+  font-size: 14px;
+  font-weight: 300;
+  line-height: 1.68;
+}
+.ds-note-label {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+}
+
+/* ---------------------------------------------------------------- data sources
+   Three fields per row, so no source can be listed without its weakness. The
+   tags are the field names: a reader should be able to find every "Limitation"
+   on the page by colour alone. */
+.ds-sources {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  margin: 46px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.ds-source {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 22px;
+  border: 1px solid rgb(var(--fg-rgb) / 0.08);
+  border-radius: 18px;
+  background: linear-gradient(
+    180deg,
+    rgb(var(--fg-rgb) / 0.045),
+    rgb(var(--fg-rgb) / 0.012)
+  );
+  transition: border-color 0.2s ease;
+}
+.ds-source:hover {
+  border-color: var(--accent-line);
+}
+.ds-source-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--accent);
+}
+.ds-source-name {
+  color: var(--ink);
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.012em;
+}
+.ds-source-used,
+.ds-source-limit {
+  margin: 0;
+  color: rgb(var(--fg-rgb) / 0.6);
+  font-size: 13.5px;
+  font-weight: 300;
+  line-height: 1.62;
+}
+.ds-source-limit {
+  padding-top: 12px;
+  border-top: 1px dashed rgb(var(--fg-rgb) / 0.1);
+}
+.ds-tag {
+  display: block;
+  margin-bottom: 5px;
+  color: rgb(var(--fg-rgb) / max(var(--a-min), 0.4));
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+.ds-tag-warn {
+  color: var(--warn-deep);
+}
+
+/* ------------------------------------------------------------- card variants
+   `.ds-card` is a 4-up hero recipe. A document runs out of width long before it
+   runs out of things to say, so the plain and 3-up forms live beside it. */
+.ds-cards-3 {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+/* No icon, so the title leads and the top edge moves up to meet it. */
+.ds-card-plain {
+  padding: 20px 20px 22px;
+}
+.ds-card-plain .ds-card-title {
+  margin-bottom: 7px;
+  font-size: 15px;
+}
+
+/* --- the three chat outcomes: the engine is the finding, so it goes first --- */
+.ds-card-outcome {
+  display: flex;
+  flex-direction: column;
+  padding-top: 20px;
+}
+.ds-engine {
+  display: inline-block;
+  /* The card is a flex column, which would otherwise stretch a `display:
+     inline-block` chip across the full measure. */
+  align-self: flex-start;
+  margin-bottom: 14px;
+  padding: 3px 9px;
+  border: 1px solid var(--accent-line);
+  border-radius: 7px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-family: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo,
+    monospace;
+  font-size: 11.5px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+}
+/* The condition is a footnote, so it sits on the floor of the card: three cards
+   in a row then share one hairline instead of three at three heights. */
+.ds-when {
+  margin: auto 0 0;
+  padding-top: 14px;
+  border-top: 1px solid rgb(var(--fg-rgb) / 0.07);
+  color: rgb(var(--fg-rgb) / max(var(--a-min), 0.42));
+  font-size: 12px;
+  font-weight: 300;
+  line-height: 1.55;
+}
+
+/* --- code: the shared plate, widened for a real signature --- */
+.ds-code-wide {
+  max-width: 860px;
+  margin-top: 44px;
+  font-size: 13px;
+  line-height: 1.75;
+}
+
+/* ------------------------------------------------------------------ tick lists
+   Two flavours of the same thing: a list that is not a choice. `ds-ticks` is
+   "these hold", `ds-limits` is "these do not". */
+.ds-ticks,
+.ds-limits {
+  display: grid;
+  gap: 12px;
+  max-width: var(--measure);
+  margin: 34px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.ds-tick,
+.ds-limit {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  color: rgb(var(--fg-rgb) / 0.66);
+  font-size: 14.5px;
+  font-weight: 300;
+  line-height: 1.62;
+}
+.ds-tick > svg,
+.ds-limit > svg {
+  flex: 0 0 auto;
+  margin-top: 3px;
+}
+.ds-tick > svg {
+  color: var(--accent);
+}
+.ds-limit {
+  color: rgb(var(--fg-rgb) / 0.6);
+}
+.ds-limit > svg {
+  color: var(--bad-soft);
+}
+.ds-limits {
+  gap: 14px;
+}
+
+/* ------------------------------------------------------------- roadmap triad
+   Three states, colour-coded by what the repository can prove right now, not by
+   how much we want the item. The third column is styled like the other two on
+   purpose: "not built" is a decision, not a shame. */
+.ds-tri {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+  margin-top: 46px;
+}
+.ds-tri-col {
+  padding: 22px;
+  border: 1px solid rgb(var(--fg-rgb) / 0.08);
+  border-top-width: 2px;
+  border-radius: 18px;
+  background: linear-gradient(
+    180deg,
+    rgb(var(--fg-rgb) / 0.04),
+    rgb(var(--fg-rgb) / 0.01)
+  );
+}
+.ds-tri-title {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin: 0 0 16px;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+.ds-tri-list {
+  display: grid;
+  gap: 11px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.ds-tri-list li {
+  position: relative;
+  padding-left: 15px;
+  color: rgb(var(--fg-rgb) / 0.6);
+  font-size: 13.5px;
+  font-weight: 300;
+  line-height: 1.58;
+}
+.ds-tri-list li::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 8px;
+  width: 5px;
+  height: 5px;
+  border-radius: 999px;
+  background: currentColor;
+  color: inherit;
+}
+.ds-tri-shipped {
+  border-top-color: var(--accent);
+}
+.ds-tri-shipped .ds-tri-title {
+  color: var(--accent);
+}
+.ds-tri-shipped .ds-tri-list li::before {
+  background: var(--accent);
+}
+.ds-tri-partial {
+  border-top-color: var(--warn);
+}
+.ds-tri-partial .ds-tri-title {
+  color: var(--warn);
+}
+.ds-tri-partial .ds-tri-list li::before {
+  background: var(--warn);
+}
+.ds-tri-open {
+  border-top-color: rgb(var(--fg-rgb) / 0.22);
+}
+.ds-tri-open .ds-tri-title {
+  color: rgb(var(--fg-rgb) / 0.62);
+}
+.ds-tri-open .ds-tri-list li {
+  color: rgb(var(--fg-rgb) / max(var(--a-min), 0.48));
+}
+.ds-tri-open .ds-tri-list li::before {
+  border-radius: 0;
+  background: transparent;
+  border: 1px solid rgb(var(--fg-rgb) / 0.32);
+  width: 5px;
+  height: 5px;
+  top: 7px;
+}
+
+/* ------------------------------------------------------------------------- faq
+   A real `<details>` element, not a click handler: it is keyboard correct, it
+   deep links with `#faq` semantics and it works before the bundle arrives. */
+.ds-faq-inner {
+  max-width: 900px;
+}
+.ds-faq {
+  margin-top: 40px;
+  border-top: 1px solid rgb(var(--fg-rgb) / 0.08);
+}
+.ds-faq-item {
+  border-bottom: 1px solid rgb(var(--fg-rgb) / 0.08);
+}
+.ds-faq-q {
+  position: relative;
+  display: block;
+  padding: 20px 46px 20px 0;
+  color: var(--ink);
+  font-size: clamp(15.5px, 1.5vw, 17.5px);
+  font-weight: 500;
+  letter-spacing: -0.014em;
+  line-height: 1.45;
+  cursor: pointer;
+  list-style: none;
+  transition: color 0.16s ease;
+}
+.ds-faq-q::-webkit-details-marker {
+  display: none;
+}
+/* The affordance is drawn, not imported: one plus that becomes a minus, so the
+   widget costs nothing to load and inherits the accent. */
+.ds-faq-q::after {
+  content: "";
+  position: absolute;
+  right: 14px;
+  top: 22px;
+  width: 13px;
+  height: 13px;
+  background: linear-gradient(
+        to bottom,
+        currentColor 0 100%
+      )
+      center / 13px 1px no-repeat,
+    linear-gradient(to bottom, currentColor 0 100%) center / 1px 13px no-repeat;
+  color: rgb(var(--fg-rgb) / max(var(--a-min), 0.45));
+  transition:
+    background-size 0.22s cubic-bezier(0.2, 0.8, 0.2, 1),
+    color 0.16s ease;
+}
+.ds-faq-q:hover {
+  color: var(--accent);
+}
+.ds-faq-q:hover::after {
+  color: var(--accent);
+}
+/* Collapsed to a minus, not rotated: a plus turned 90° is still a plus, so the
+   open state would have looked identical to the closed one. */
+.ds-faq-item[open] .ds-faq-q::after {
+  background-size: 13px 1px, 0 0;
+  color: var(--accent);
+}
+.ds-faq-a {
+  max-width: var(--measure);
+  margin: 0 0 22px;
+  padding-right: 46px;
+  color: rgb(var(--fg-rgb) / 0.62);
+  font-size: 14.5px;
+  font-weight: 300;
+  line-height: 1.7;
+}
+
+/* The eyebrow that carries an icon needs the glyph on the baseline of the
+   uppercase label rather than above it. */
+.ds-eyebrow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.ds-eyebrow > svg {
+  flex: 0 0 auto;
+  color: var(--accent);
+}
+
+/* The entrance choreography is scoped to the hero, so the document's own
+   eyebrow, subhead copy and chips arrive with the headline instead of popping
+   in after it. */
+.ds-root[data-landing="pending"] .ds-page-hero .ds-eyebrow,
+.ds-root[data-landing="pending"] .ds-chips {
+  opacity: 0;
+}
+.ds-root[data-landing="ready"] .ds-page-hero .ds-eyebrow {
+  opacity: 1;
+  transition: opacity 0.8s ease 0.12s;
+}
+.ds-root[data-landing="ready"] .ds-chips {
+  opacity: 1;
+  transition: opacity 0.9s ease 0.56s;
+}
+
+/* ============================================================================
+   Docs page: the reference layer
+   ==========================================================================
+   About is an essay: one column, read top to bottom once. Docs is a reference:
+   a reader arrives with a question, wants the answer in one jump, and returns
+   later for a specific number. That changes the layout, not the design language,
+   so every colour, type and plate token above is reused and only the three
+   things a reference needs are added here - a rail to navigate from, a rail to
+   check your position against, and a measure wide enough for a real table.
+
+   The shell is `display: grid` rather than a flex row so the middle column can
+   hold tables that would otherwise push the rails off the page: the content
+   track is `minmax(0, 1fr)`, which is the one declaration that lets a wide table
+   scroll inside its own wrapper instead of widening the document.
+   ========================================================================== */
+.ds-docs-shell {
+  --docs-content: min(900px, 100%);
+  display: grid;
+  grid-template-columns: minmax(0, 218px) minmax(0, 1fr) minmax(0, 232px);
+  gap: 0 clamp(28px, 3.4vw, 60px);
+  max-width: 1520px;
+  margin: 0 auto;
+  align-items: start;
+}
+
+/* Both rails pin under the fixed nav. `align-self: start` is not decoration:
+   a stretched grid item fills its area, and an element that fills its area has
+   no room left to move within it, so sticky silently never fires. */
+.ds-docs-side,
+.ds-docs-aside {
+  position: sticky;
+  top: 92px;
+  align-self: start;
+  max-height: calc(100dvh - 116px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+}
+
+/* The content track carries the type scale and the reading measure for the whole
+   column, so a section deep in the page inherits them instead of restating. */
+.ds-docs-content {
+  min-width: 0;
+}
+.ds-docs-content .ds-section {
+  padding: clamp(44px, 4.6vw, 68px) 0;
+}
+.ds-docs-content .ds-section-inner {
+  max-width: none;
+}
+.ds-docs-body {
+  max-width: var(--docs-content);
+}
+.ds-docs-content .ds-table-wrap {
+  /* A reference table is the content, not an attachment: at the full measure it
+     can keep a real column count without borrowing width from the rails. */
+  max-width: 100%;
+}
+
+/* ------------------------------------------------------------------------- rail
+   Numbered, grouped and tall enough to show where you are in a 20-part manual
+   without opening one. The number is load-bearing: it lets the copy refer to
+   "section 12" the way the printed manuals this one is modelled on do. */
+.ds-docs-side {
+  padding: 4px 0 24px;
+}
+.ds-docs-nav-group {
+  margin: 0 0 26px;
+  padding: 0;
+}
+.ds-docs-nav-group:last-child {
+  margin-bottom: 0;
+}
+.ds-docs-nav-title {
+  padding: 0 12px 7px;
+  color: rgb(var(--fg-rgb) / max(var(--a-min), 0.44));
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+}
+.ds-docs-link {
+  display: flex;
+  align-items: baseline;
+  gap: 9px;
+  padding: 6px 12px;
+  border-radius: 9px;
+  color: rgb(var(--fg-rgb) / max(var(--a-min), 0.58));
+  font-size: 13.5px;
+  font-weight: 400;
+  line-height: 1.35;
+  letter-spacing: -0.006em;
+  text-decoration: none;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease;
+}
+.ds-docs-link:hover {
+  background: rgb(var(--fg-rgb) / 0.05);
+  color: var(--ink);
+}
+.ds-docs-link-n {
+  flex: 0 0 auto;
+  color: rgb(var(--fg-rgb) / max(var(--a-min), 0.32));
+  font-family: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo,
+    monospace;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+/* The active item is marked by the client rail, not by `:target`: a reader's
+   position is a range, and only a scroll observer knows which range they are in. */
+.ds-docs-link-active {
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 500;
+}
+.ds-docs-link-active .ds-docs-link-n {
+  color: var(--accent);
+}
+
+/* ------------------------------------------------------------------------ aside
+   The right rail answers "how much of this section is left", which is the only
+   thing a reader wants to know at the bottom of a long page. Items are only
+   listed for the section you are in, so the rail never becomes a second index. */
+.ds-docs-aside {
+  padding: 4px 0 24px;
+}
+.ds-docs-aside-title {
+  margin: 0 0 10px;
+  padding: 0 10px;
+  color: rgb(var(--fg-rgb) / max(var(--a-min), 0.44));
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+}
+.ds-docs-toc {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.ds-docs-toc li + li {
+  margin-top: 1px;
+}
+.ds-docs-toc a {
+  display: block;
+  padding: 5px 10px;
+  border-left: 1px solid rgb(var(--fg-rgb) / 0.1);
+  color: rgb(var(--fg-rgb) / max(var(--a-min), 0.52));
+  font-size: 12.5px;
+  font-weight: 400;
+  line-height: 1.4;
+  text-decoration: none;
+  transition:
+    border-color 0.15s ease,
+    color 0.15s ease;
+}
+.ds-docs-toc a:hover {
+  border-left-color: var(--accent-line);
+  color: var(--ink);
+}
+/* Progress is a proportion, so it is drawn as one: the rail's own height is the
+   track and the fill is the share of the document that has passed above it. */
+.ds-docs-progress {
+  height: 2px;
+  margin: 14px 10px 0;
+  border-radius: 2px;
+  background: rgb(var(--fg-rgb) / 0.09);
+  overflow: hidden;
+}
+.ds-docs-progress i {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  transform-origin: left center;
+  transition: transform 0.12s linear;
+}
+
+/* ------------------------------------------------------------------- chapter head
+   The h2 is the anchor the reader aimed at, so it gets the clearance the fixed
+   nav would otherwise take from it - on the heading, not the section, because
+   subheads are targets too. */
+.ds-docs-content .ds-h2 {
+  max-width: 34ch;
+  margin-top: 14px;
+  font-size: clamp(27px, 2.9vw, 38px);
+  line-height: 1.12;
+  letter-spacing: -0.026em;
+  scroll-margin-top: 92px;
+}
+.ds-docs-content .ds-subhead {
+  scroll-margin-top: 92px;
+}
+.ds-docs-kicker {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  color: rgb(var(--fg-rgb) / max(var(--a-min), 0.5));
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+}
+.ds-docs-kicker-n {
+  padding: 2px 8px;
+  border: 1px solid var(--accent-line);
+  border-radius: 6px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-family: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo,
+    monospace;
+  font-size: 11px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ------------------------------------------------------------------- glossary
+   Term and definition on one line where there is room, stacked on a phone. A
+   `<dl>` keeps the pairing semantic for a reader using assistive tech. */
+.ds-gloss {
+  margin: 22px 0 0;
+  padding: 0;
+}
+.ds-gloss-item {
+  display: grid;
+  grid-template-columns: minmax(150px, 210px) minmax(0, 1fr);
+  gap: 6px 22px;
+  padding: 13px 0;
+  border-top: 1px solid rgb(var(--fg-rgb) / 0.09);
+}
+.ds-gloss-item:last-child {
+  border-bottom: 1px solid rgb(var(--fg-rgb) / 0.09);
+}
+.ds-gloss-term {
+  margin: 0;
+  font-weight: 600;
+  color: var(--ink);
+}
+.ds-gloss-def {
+  margin: 0;
+  color: rgb(var(--fg-rgb) / max(var(--a-min), 0.72));
+  line-height: 1.55;
+}
+@media (max-width: 560px) {
+  .ds-gloss-item {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 3px;
+  }
+}
+
+/* ------------------------------------------------------------------- steps plate
+   Every command a reader can paste. It stays dark in both themes for the same
+   reason the terminal does: a shell prompt is not our colour system's business. */
+.ds-docs-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  max-width: 860px;
+  margin: 26px 0 0;
+  padding: 18px 20px;
+  border: 1px solid rgb(var(--fg-rgb) / 0.09);
+  border-radius: 14px;
+  background: var(--code-bg);
+}
+.ds-docs-step {
+  display: flex;
+  align-items: baseline;
+  gap: 11px;
+  color: var(--code-ink);
+  font-family: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo,
+    monospace;
+  font-size: 12.5px;
+  line-height: 1.6;
+}
+.ds-docs-step-c {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-x: auto;
+  white-space: pre;
+  scrollbar-width: thin;
+}
+.ds-docs-step-n {
+  flex: 0 0 auto;
+  color: var(--code-key);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.ds-docs-step-note {
+  margin: 14px 0 0;
+  color: rgb(var(--fg-rgb) / max(var(--a-min), 0.52));
+  font-size: 12.5px;
+  font-weight: 300;
+  line-height: 1.6;
+}
+
+/* ------------------------------------------------------------------- key press
+   `kbd` keeps its semantics; the browser's default bevel is removed rather than
+   argued with, and the plate is drawn from the same tokens as an inline literal. */
+.ds-docs-kbd {
+  display: inline-block;
+  min-width: 20px;
+  padding: 1px 6px;
+  border: 1px solid rgb(var(--fg-rgb) / 0.13);
+  border-bottom-width: 2px;
+  border-radius: 6px;
+  background: rgb(var(--fg-rgb) / 0.05);
+  color: var(--ink);
+  font-family: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo,
+    monospace;
+  font-size: 11.5px;
+  font-weight: 500;
+  text-align: center;
+  white-space: nowrap;
+}
+
+/* ----------------------------------------------------------------- endpoint cells
+   A verb and a path that wrap onto two lines is a path a reader cannot copy, so
+   these two columns opt out of the measure and let the wrapper scroll instead. */
+.ds-td-method {
+  white-space: nowrap;
+  font-family: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo,
+    monospace;
+  font-size: 12.5px;
+}
+.ds-td-method b {
+  color: var(--accent);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+.ds-td-path {
+  white-space: nowrap;
+  font-family: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo,
+    monospace;
+  font-size: 12.5px;
+  color: var(--ink);
+}
+
+/* Visually hidden, but still read by assistive tech and still present as a
+   region's accessible name. Used for table captions, which would otherwise
+   crowd the header row of a reference table. */
+.ds-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ------------------------------------------------------------------- hero variant
+   The docs hero shares the document hero's film and type, but its chips index a
+   reference rather than summarising an essay: left-aligned, in reading order,
+   and long enough that it must never clip a label. */
+.ds-docs-hero .ds-chips {
+  justify-content: flex-start;
+  max-width: 900px;
+  margin-left: 0;
+  margin-right: 0;
+}
+.ds-docs-hero .ds-h2 {
+  max-width: 30ch;
+}
+
+/* ============================================================================
+   Breakpoints — derived from the design, not stock values
+   ========================================================================== */
+
+/* TABLET: 218 + 232 of rail plus two gaps costs a third of a 1160px viewport.
+   The index is the rail a reader actually uses on a long manual, so it stays and
+   the position marker goes - it is the only one of the two that is decorative. */
+@media (max-width: 1320px) {
+  .ds-docs-shell {
+    grid-template-columns: minmax(0, 214px) minmax(0, 1fr);
+  }
+  .ds-docs-aside {
+    display: none;
+  }
+}
+
+/* MOBILE: the rail becomes a horizontal strip under the hero. It is not hidden:
+   on a phone a manual still needs its contents visible before the first scroll,
+   and a strip that is one flick long is cheaper to reach than a drawer. */
+@media (max-width: 900px) {
+  .ds-docs-shell {
+    display: block;
+    padding: 0 0 8px;
+  }
+  .ds-docs-side {
+    position: static;
+    display: flex;
+    gap: 8px;
+    max-height: none;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding: 0 0 12px;
+    border-bottom: 1px solid rgb(var(--fg-rgb) / 0.08);
+    -webkit-overflow-scrolling: touch;
+  }
+  .ds-docs-nav-group {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 0;
+  }
+  .ds-docs-nav-title {
+    padding: 0 2px 0 10px;
+    white-space: nowrap;
+  }
+  .ds-docs-link {
+    padding: 7px 13px;
+    border: 1px solid rgb(var(--fg-rgb) / 0.1);
+    border-radius: 999px;
+    background: rgb(var(--fg-rgb) / 0.03);
+    font-size: 13px;
+    white-space: nowrap;
+  }
+  .ds-docs-link:hover {
+    background: rgb(var(--fg-rgb) / 0.06);
+  }
+  .ds-docs-link-n {
+    display: none;
+  }
+  .ds-docs-content .ds-section {
+    padding: 46px 0;
+  }
+  .ds-docs-steps {
+    padding: 14px 15px;
+  }
+}
+
+@media (max-width: 560px) {
+  .ds-docs-content .ds-h2 {
+    font-size: 26px;
+    letter-spacing: -0.022em;
+  }
+  .ds-docs-step {
+    font-size: 11.5px;
+  }
 }
 
 /* ============================================================================
@@ -931,7 +2360,7 @@
     padding: 8px;
     border: 1px solid var(--glass-line);
     border-radius: 18px;
-    background: rgba(8, 16, 13, 0.94);
+    background: var(--menu-glass);
     -webkit-backdrop-filter: blur(16px) saturate(120%);
     backdrop-filter: blur(16px) saturate(120%);
     box-shadow: 0 24px 60px -20px rgba(0, 0, 0, 0.85);
@@ -981,6 +2410,50 @@
   }
   .ds-how-grid {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  /* --- document layer at tablet ---
+     Four-up cards become two-up above; the bands that depend on a wide measure
+     get the same treatment here, each for its own reason. */
+  .ds-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .ds-sources,
+  .ds-tri {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .ds-cards-3 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  /* Two columns of numbered stages at 1160px puts each column under 500px, where
+     a step paragraph drops to two words per line. One column, wider rail. */
+  .ds-steps-2 {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0;
+  }
+  .ds-steps-2 .ds-step:nth-child(2n)::after {
+    display: block;
+  }
+  .ds-steps-2 .ds-step:last-child::after {
+    display: none;
+  }
+  .ds-page-hero .ds-h1 {
+    font-size: min(clamp(40px, 5.4vw, 76px), 10.5vw);
+    letter-spacing: -0.026em;
+  }
+  .ds-page-hero .ds-btn-lg {
+    height: 48px;
+  }
+  .ds-chips {
+    gap: 7px;
+  }
+  .ds-pull {
+    max-width: 38ch;
+  }
+  /* The tables keep their min-width and hand off to the scroller: compressing
+     "What it cannot establish" below 34ch would delete the point of the table. */
+  .ds-td-cannot {
+    min-width: 30ch;
   }
 }
 
@@ -1048,6 +2521,136 @@
     flex-direction: column;
     align-items: flex-start;
   }
+
+  /* --- document layer on a phone ---
+     Nothing here is a scale of the desktop: the chip row becomes a scrollable
+     strip, the tables give up their nowrap columns, and the subhead rule stops
+     pretending a section break needs 76px of air. */
+  .ds-page-hero {
+    padding-top: 108px;
+    padding-bottom: 56px;
+    /* At 390px the hero is barely taller than its own copy, so the same film
+       that reads as atmosphere on a monitor lands directly behind the
+       sub-paragraph. Less of it, and more scrim over what remains. These are
+       set on the hero itself, so both the film and the tint pick them up. */
+    --film-power: 0.46;
+    --film-scrim: 0.62;
+  }
+  html.light .ds-page-hero {
+    /* Paper shows the wash through more readily than black does. */
+    --film-power: 0.4;
+  }
+  .ds-page-hero .ds-h1 {
+    max-width: 14ch;
+    font-size: min(clamp(40px, 5.4vw, 76px), 11.2vw);
+  }
+  .ds-page-hero .ds-ctas {
+    margin-top: 26px;
+  }
+  .ds-page-hero .ds-btn-lg {
+    height: 46px;
+    padding: 0 20px;
+  }
+  .ds-chips {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    margin-top: 34px;
+  }
+  .ds-chips a {
+    padding: 11px 12px;
+    font-size: 12px;
+    text-align: center;
+  }
+
+  .ds-subhead {
+    margin-top: 48px;
+    font-size: 19px;
+  }
+  .ds-pull {
+    padding-left: 18px;
+    margin-top: 40px;
+  }
+  .ds-pull blockquote {
+    font-size: 21px;
+    letter-spacing: -0.016em;
+  }
+
+  .ds-stats {
+    gap: 1px;
+    margin-top: 32px;
+    border-radius: 14px;
+  }
+  .ds-stat {
+    padding: 18px 16px 20px;
+  }
+  .ds-stat-num {
+    font-size: 28px;
+  }
+  .ds-stat-label {
+    font-size: 12.5px;
+  }
+  .ds-stat-note {
+    font-size: 11.5px;
+  }
+
+  .ds-sources {
+    gap: 12px;
+    margin-top: 34px;
+  }
+  .ds-cards-3 {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .ds-table-wrap {
+    margin-top: 28px;
+    border-radius: 14px;
+  }
+  /* Keep the scroller honest but stop it demanding a thumb-spanning swipe: the
+     row header and the weight column are the two things that must never wrap. */
+  .ds-table {
+    min-width: 640px;
+    font-size: 13px;
+  }
+  .ds-table-2 {
+    min-width: 440px;
+  }
+  .ds-td-cannot {
+    min-width: 26ch;
+  }
+  .ds-bands {
+    gap: 8px;
+  }
+  .ds-note {
+    padding: 16px;
+    font-size: 13.5px;
+  }
+  .ds-tri {
+    gap: 12px;
+    margin-top: 34px;
+  }
+  .ds-tri-col,
+  .ds-source {
+    padding: 18px;
+  }
+  .ds-faq-q {
+    font-size: 15.5px;
+    padding: 18px 40px 18px 0;
+  }
+  .ds-faq-q::after {
+    right: 8px;
+    top: 20px;
+  }
+  .ds-faq-a {
+    padding-right: 0;
+    font-size: 14px;
+  }
+  .ds-code-wide {
+    margin-top: 32px;
+    font-size: 12px;
+  }
+  .ds-inline-code {
+    white-space: normal;
+  }
 }
 
 @media (max-height: 520px) and (max-width: 1160px) {
@@ -1101,4 +2704,193 @@
   .ds-card:hover {
     transform: none;
   }
+
+  /* The document layer: the same rule applies as to the hero, nothing that was
+     invented for delight survives, and nothing that carries meaning is lost.
+     The grid wash, the hairlines and the bands all stay. */
+  .ds-root[data-landing="pending"] .ds-page-hero .ds-eyebrow,
+  .ds-root[data-landing="pending"] .ds-chips {
+    opacity: 1;
+  }
+  .ds-root[data-landing="ready"] .ds-page-hero .ds-eyebrow,
+  .ds-root[data-landing="ready"] .ds-chips {
+    transition: none;
+  }
+  .ds-faq-q::after,
+  .ds-chips a,
+  .ds-source,
+  .ds-table tbody tr,
+  .ds-tri-col {
+    transition: none;
+  }
+}
+
+/* ============================================================================
+   Light theme — both public documents
+   ============================================================================
+   next-themes writes `light` or `dark` on the root element before first paint
+   and this sheet does the rest. Because every colour above is one of six
+   channel triplets plus an alpha, a second theme is a re-declaration of those
+   tokens rather than a second copy of the rules: the hairlines, the washes, the
+   muted text and the accent tints all follow automatically.
+
+   The gate is `html.light .ds-root`, so `/welcome` and `/welcome/about` flip
+   together off the one shared preference. Nothing in here is scoped to `.ds-doc`:
+   that class marks the long-form document layer (the page hero, the tables, the
+   section rhythm), which the landing has no part of, and theming is not part of
+   it either.
+
+   The code plate is deliberately left dark. A terminal on paper is still a
+   terminal, and inverting it would throw away the one block on the page whose
+   colours are not ours to choose.
+   ========================================================================== */
+html.light .ds-root {
+  color-scheme: light;
+
+  /* Ink becomes the dark that white-on-black was inverted from, and the page
+     becomes paper. `--scrim-rgb` follows the same logic in reverse: the hero
+     veil has to lighten behind the type instead of darkening it. */
+  --fg-rgb: 9 17 14;
+  --bg-rgb: 250 251 250;
+  --bg-raise-rgb: 240 245 242;
+  --accent-rgb: 3 110 79; /* emerald deep enough to hold 4.5:1 on paper */
+  --glow-rgb: 5 150 105;
+  --scrim-rgb: 255 255 255;
+  /* Compositing is not symmetric: 45% white on near-black is about 8:1, while
+     45% ink on paper is 2.6:1. Everything below this line is lifted to it. */
+  --a-min: 0.62;
+
+  --panel: #ffffff;
+  --panel-hover: #eef2f0;
+  /* A white button on white paper is not a button: the primary action keeps its
+     weight by going to the other end of the scale. */
+  --cta-bg: #0b1512;
+  --cta-ink: #fbfdfc;
+  --cta-bg-hover: #17281f;
+  --glass-fill: rgba(255, 255, 255, 0.7);
+  --glass-fill-strong: rgba(255, 255, 255, 0.92);
+  --ghost-ink: #33413a;
+
+  --accent-ink: #ffffff;
+
+  /* The four bands and the two distrust tints: the dark set are pastels, and a
+     pastel on paper is unreadable. */
+  --ok: #047857;
+  --warn: #b45309;
+  --hot: #c2410c;
+  --bad: #b91c1c;
+  --bad-soft: #be123c;
+  --warn-deep: #b45309;
+
+  --nav-glass: rgba(251, 252, 251, 0.82);
+  --menu-glass: rgba(255, 255, 255, 0.97);
+  --cell-glass: rgba(255, 255, 255, 0.62);
+
+  --plate-ink: #05634a; /* the inline literal, now on a pale plate */
+
+  --film-backdrop: #f5f8f6;
+  /* The same footage, re-graded rather than re-encoded: invert puts the starfield
+     on paper and the bright dots become the drawing, the hue then comes back to
+     emerald from the other side of the wheel, and the extra contrast is what
+     turns a washed-out watermark back into line work. */
+  --video-tint: invert(1) hue-rotate(78deg) saturate(1.15) brightness(1.02)
+    contrast(1.16);
+  /* A dark globe on paper carries far more contrast than a bright one on black,
+     so the atmosphere reads at two thirds of the landing's strength. */
+  --film-power: 0.55;
+  /* Inverting the footage turns the globe's brightest line work dark, which is
+     the same value as the headline. The white veil has to come up to push it
+     back under the type. */
+  --tint-boost: 0.22;
+}
+
+/* ------------------------------------------------------------------ the toggle
+   One button, two glyphs, and CSS decides which is showing: reading the theme
+   during render would put a server-rendered document out of step with the
+   client, which is exactly the mismatch next-themes exists to avoid. The glyph
+   names the theme you are in, the same way the dashboard's switch does. */
+.ds-theme {
+  position: relative;
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: calc(34 * var(--u));
+  height: calc(28 * var(--u));
+  padding: 0;
+  border: 0;
+  border-radius: calc(14 * var(--u));
+  background: var(--panel);
+  color: rgb(var(--fg-rgb) / 0.82);
+  cursor: pointer;
+  transition:
+    background 0.18s ease,
+    color 0.18s ease;
+}
+.ds-theme:hover {
+  background: var(--panel-hover);
+  color: var(--ink);
+}
+.ds-theme svg {
+  position: absolute;
+  width: calc(14.5 * var(--u));
+  height: calc(14.5 * var(--u));
+  transition:
+    opacity 0.2s ease,
+    transform 0.28s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.ds-theme .ds-theme-moon {
+  opacity: 1;
+  transform: none;
+}
+.ds-theme .ds-theme-sun {
+  opacity: 0;
+  transform: rotate(-90deg) scale(0.6);
+}
+html.light .ds-root .ds-theme .ds-theme-sun {
+  opacity: 1;
+  transform: none;
+}
+html.light .ds-root .ds-theme .ds-theme-moon {
+  opacity: 0;
+  transform: rotate(90deg) scale(0.6);
+}
+/* In the bar the button is an icon, so its name is for the accessibility tree
+   only. */
+.ds-theme-label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* In the mobile panel it is a row of the menu, and the name is printed. */
+.ds-menu .ds-theme {
+  width: 100%;
+  height: 40px;
+  margin-top: 10px;
+  /* Left-aligned like every other row of the panel, with the glyph held in the
+     gutter the text rows start from. */
+  justify-content: flex-start;
+  padding: 0 14px 0 40px;
+  border-radius: 12px;
+  background: rgb(var(--fg-rgb) / 0.05);
+  color: rgb(var(--fg-rgb) / 0.72);
+  font-size: 13.5px;
+  font-weight: 500;
+}
+.ds-menu .ds-theme:hover {
+  background: rgb(var(--fg-rgb) / 0.09);
+}
+.ds-menu .ds-theme svg {
+  left: 14px;
+}
+.ds-menu .ds-theme .ds-theme-label {
+  position: static;
+  width: auto;
+  height: auto;
+  overflow: visible;
+  clip-path: none;
 }

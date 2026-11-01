@@ -5,6 +5,7 @@ import type {
   Alert,
   CatalogFacets,
   ChatAnswer,
+  CoverageStatus,
   DashboardResponse,
   ProtocolCatalogPage,
   ProtocolResearch,
@@ -66,7 +67,12 @@ export class ApiError extends Error {
       str(detail.detail) ??
       fallbackText ??
       "";
-    super(`API ${path} failed: ${status} ${reason}`.trim());
+    /* The base URL is part of the message on purpose. A wrong or stale
+       `NEXT_PUBLIC_API_URL` does not look like a configuration problem from the
+       visitor's side: it looks like a dead backend, because whatever answers the
+       port answers with its own 404. Naming the URL that was actually tried
+       turns that into a one-glance diagnosis. */
+    super(`API ${API_URL}${path} failed: ${status} ${reason}`.trim());
     this.name = "ApiError";
     this.status = status;
     this.reason = reason;
@@ -165,6 +171,46 @@ async function get<T>(
   });
   if (!res.ok) await fail(path, res);
   return res.json() as Promise<T>;
+}
+
+/**
+ * Public, cookie-free GET for the prerendered marketing/docs pages.
+ *
+ * `get()` always reaches for the session cookie, which forces any caller into
+ * dynamic rendering and, worse, would let a shared cache key leak one visitor's
+ * board onto another's landing page. `/api/status` is aggregate-only and
+ * anonymous by design, so this variant never touches cookies: the only header
+ * it can send is none. It still guards against a cold backend with a short,
+ * landing-sized timeout so a hung upstream degrades to an `n/a` panel rather
+ * than stalling the whole page render.
+ */
+async function publicGet<T>(
+  path: string,
+  revalidate = 120,
+  timeoutMs = 8_000,
+): Promise<T> {
+  const res = await fetch(`${API_URL}${path}`, {
+    next: { revalidate },
+    signal: AbortSignal.timeout(timeoutMs),
+  });
+  if (!res.ok) await fail(path, res);
+  return res.json() as Promise<T>;
+}
+
+/**
+ * The public coverage snapshot behind the landing page's real numbers.
+ *
+ * Returns `null` instead of throwing when the store or the API is unreachable:
+ * a marketing page must render an honest `n/a` when it cannot count, not fail.
+ * The caller renders the reason from `status`, so a genuine "empty" store (all
+ * zeros) stays visually distinct from "we could not look" (nulls).
+ */
+export async function fetchCoverage(): Promise<CoverageStatus | null> {
+  try {
+    return await publicGet<CoverageStatus>("/api/status", 120);
+  } catch {
+    return null;
+  }
 }
 
 /**

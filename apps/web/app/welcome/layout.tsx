@@ -36,8 +36,16 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
+  /* Both public pages under this layout carry two themes and the visitor picks
+     one, so the browser is told to render its own chrome (scrollbars, form
+     controls) for either. next-themes writes `color-scheme` on the root element
+     as well, which is what actually tracks the choice; this is the fallback for
+     the first paint. */
+  colorScheme: "light dark",
+  /* One value, the dark one, on purpose: `enableSystem` is off, so keying this
+     on `prefers-color-scheme` would describe the visitor's operating system
+     rather than the theme they are looking at, and the default theme is dark. */
   themeColor: "#050807",
-  colorScheme: "dark",
 };
 
 export default function WelcomeLayout({

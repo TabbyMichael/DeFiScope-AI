@@ -427,6 +427,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Status
+         * @description Aggregate coverage of the store: protocols, days, bands, alerts, index.
+         */
+        get: operations["status_api_status_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -565,6 +585,82 @@ export interface components {
             protocol_slug?: string | null;
             /** Question */
             question: string;
+        };
+        /**
+         * CoverageStatus
+         * @description Public, aggregate view of what the service has actually observed.
+         *
+         *     Every count is nullable, and the null is load-bearing: ``null`` means
+         *     "could not be measured" (the store was unreachable, or a probe failed)
+         *     while ``0`` means "measured, and there are none". A landing page that
+         *     renders this must show the difference - reporting zero for an unreachable
+         *     database would be the exact lie the rest of the product is built to avoid.
+         *
+         *     No row-level data and no secrets are exposed here: configuration flags are
+         *     reported as booleans (``llm_configured``), never as values.
+         */
+        CoverageStatus: {
+            /** Alerts 7D */
+            alerts_7d?: number | null;
+            /** Alerts By Severity */
+            alerts_by_severity?: {
+                [key: string]: number;
+            } | null;
+            /** Alerts Total */
+            alerts_total?: number | null;
+            /** As Of */
+            as_of?: string | null;
+            /** Bands */
+            bands?: {
+                [key: string]: number;
+            } | null;
+            /** Captured At */
+            captured_at?: string | null;
+            /** Categories */
+            categories?: number | null;
+            /** Chains */
+            chains?: number | null;
+            /** Index Chunks */
+            index_chunks?: number | null;
+            /**
+             * Llm Configured
+             * @default false
+             */
+            llm_configured: boolean;
+            /**
+             * Monitor Interval Minutes
+             * @default 30
+             */
+            monitor_interval_minutes: number;
+            /** Observation Days */
+            observation_days?: number | null;
+            /** Onchain Chains */
+            onchain_chains?: number | null;
+            /**
+             * Onchain Configured
+             * @default false
+             */
+            onchain_configured: boolean;
+            /** Onchain Observations */
+            onchain_observations?: number | null;
+            /** Onchain Protocols */
+            onchain_protocols?: number | null;
+            /**
+             * Protocols Curated
+             * @default 0
+             */
+            protocols_curated: number;
+            /** Protocols Scored */
+            protocols_scored?: number | null;
+            /** Protocols Tracked */
+            protocols_tracked?: number | null;
+            /** Scored Observations */
+            scored_observations?: number | null;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "ok" | "empty" | "unavailable";
         };
         /**
          * DashboardResponse
@@ -1555,6 +1651,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    status_api_status_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CoverageStatus"];
                 };
             };
         };

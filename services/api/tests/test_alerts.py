@@ -1,10 +1,11 @@
 """Tests for alert rule evaluation."""
 
 import time
+from datetime import UTC, datetime
 
 from app.clients.defillama import ProtocolDetail, ProtocolSummary
 from app.config import get_settings
-from app.db import SessionLocal
+from app.db import ProtocolSnapshot, SessionLocal
 from app.services import alerts
 from app.services.protocols import ResearchPack
 
@@ -223,3 +224,60 @@ class TestRunMonitorOnchainWiring:
         finally:
             db.close()
             settings.onchain_data_enabled = previous
+
+
+class TestSnapshotWritesAreIdempotent:
+    """The scheduler's 30-minute pass and the dashboard's cold hydration can
+    backfill the same slug at the same moment. Each answers "any rows yet?" with
+    a SELECT, both see none, and the loser used to raise IntegrityError on
+    ``uq_snapshot_slug_date`` straight out of ``GET /api/dashboard``, which the
+    board renders as "API unavailable". The write now goes through
+    ``ON CONFLICT DO NOTHING``, so losing the race writes nothing.
+    """
+
+    def _row(self, slug: str, date: str) -> dict:
+        return {
+            "slug": slug,
+            "date": date,
+            "name": "Race Test",
+            "tvl": 10.0,
+            "captured_at": datetime.now(UTC),
+        }
+
+    def test_a_duplicate_write_is_ignored_not_raised(self):
+        db = SessionLocal()
+        try:
+            alerts._insert_snapshots_ignoring_conflicts(db, [self._row("race-test", "2026-01-01")])
+            db.commit()
+
+            # The same statement again, plus one genuinely new day: the
+            # duplicate has to vanish and the new row has to land.
+            alerts._insert_snapshots_ignoring_conflicts(
+                db,
+                [
+                    self._row("race-test", "2026-01-01"),
+                    self._row("race-test", "2026-01-02"),
+                ],
+            )
+            db.commit()
+
+            dates = (
+                db.query(ProtocolSnapshot.date)
+                .filter(ProtocolSnapshot.slug == "race-test")
+                .order_by(ProtocolSnapshot.date)
+                .all()
+            )
+            assert [d[0] for d in dates] == ["2026-01-01", "2026-01-02"]
+        finally:
+            db.query(ProtocolSnapshot).filter(ProtocolSnapshot.slug == "race-test").delete()
+            db.commit()
+            db.close()
+
+    def test_no_rows_sends_no_statement(self):
+        # An empty VALUES list compiles to invalid SQL, so the helper must return
+        # before it ever reaches the engine.
+        db = SessionLocal()
+        try:
+            alerts._insert_snapshots_ignoring_conflicts(db, [])
+        finally:
+            db.close()

@@ -1,44 +1,45 @@
-"use client";
-
+import { Suspense } from "react";
 import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
 import {
+  ArrowRight,
   BellRing,
+  Database,
   LayoutGrid,
   MessageSquareText,
   ShieldCheck,
 } from "lucide-react";
 
-import { API_PUBLIC_URL } from "@/lib/api-config";
+import {
+  Arrow,
+  LandingFooter,
+  LandingNav,
+  LandingReveal,
+} from "./landing-chrome";
+import { LandingFilm } from "./landing-film";
+import { LINKS } from "./links";
+import {
+  BANDS,
+  INDICATORS,
+  RULES,
+  SOURCES,
+  fmtCount,
+} from "@/components/docs/docs-data";
+import { fetchCoverage } from "@/lib/api";
 
 /* ---------------------------------------------------------------------------
-   The film, verbatim. Two copies of the same file: the clip's last frame does
-   not match its first, so a plain `loop` snaps a continent sideways every ten
-   seconds. They ping-pong instead (see the cross-fade effect below), and the
-   browser only fetches the asset once.
+   The landing. The hero, the rotating-globe film and the theme switch are the
+   approved ones and are untouched; everything below them is rebuilt to have
+   depth, and the depth is real: the first body section reads the live aggregate
+   at `/api/status` (passed in by the server page) rather than asserting numbers.
+
+   Two rules carry over from the product itself:
+   1. Every figure is either a property of the shipped code or the live coverage
+      read. Nothing here is a capability invented for a page.
+   2. A value that could not be measured renders `n/a`, never a zero. When the
+      whole backend is unreachable (`coverage === null`) the band says so once and
+      every cell reads `n/a`; it never collapses that into "0 protocols".
    ------------------------------------------------------------------------- */
-const VIDEO_SRC =
-  "https://d8j0ntlcm91z4.cloudfront.net/user_38xzZboKViGWJOttwIXH07lWA1P/hf_20260912_104036_bd6924f6-3c8e-417e-8465-6d03c8c2e9e6.mp4";
-const POSTER_SRC =
-  "https://d2ol7oe51mr4n9.cloudfront.net/user_38xzZboKViGWJOttwIXH07lWA1P/82e7eb75-c65f-490a-99b5-f3d1cad54200.webp";
 
-/** The two copies take turns; this is the class the swap toggles. */
-const ACTIVE = "ds-is-active";
-
-/** One place to repoint the page once the real destinations exist. */
-const LINKS = {
-  login: "/login",
-  board: "/login",
-  about: "/about",
-  docs: `${API_PUBLIC_URL}/docs`,
-} as const;
-
-/**
- * The four surfaces, each one a thing the backend actually does — not a
- * capability invented for a landing page. The wording is lifted from the
- * methodology and architecture docs so the page cannot promise more than the
- * pipeline delivers.
- */
 const CAPABILITIES = [
   {
     icon: ShieldCheck,
@@ -48,7 +49,7 @@ const CAPABILITIES = [
   {
     icon: LayoutGrid,
     title: "Research board",
-    text: "TVL, 7d/30d moves, fees, DEX volume and chain concentration across curated protocols plus the top 50 by TVL, all rendered DB-first from daily snapshots.",
+    text: "TVL, 7d/30d moves, fees, DEX volume and chain concentration across the watchlist, rendered DB-first from daily snapshots so a page never waits on a live crawl.",
   },
   {
     icon: BellRing,
@@ -62,10 +63,10 @@ const CAPABILITIES = [
   },
 ] as const;
 
-const STEPS = [
+const PIPELINE = [
   {
     title: "Ingest",
-    text: "DefiLlama packs are normalized to a daily, forward-filled UTC frame; Dune adds four contract-level activity metrics per chain, per day. A missing feed stays a gap.",
+    text: "DefiLlama packs normalize to a daily, forward-filled UTC frame; Dune adds four contract-level activity metrics per chain, per day, only when both a key and a query id exist.",
   },
   {
     title: "Score",
@@ -73,307 +74,151 @@ const STEPS = [
   },
   {
     title: "Monitor",
-    text: "A 30-minute pass re-scores the watchlist, fires the rules with the metric, value and threshold that triggered them, and notifies the channels you configured.",
+    text: "A scheduled pass re-scores the watchlist, fires the rules with the metric, value and threshold that triggered them, and notifies whichever channels you configured.",
   },
 ] as const;
 
-function Arrow({ className }: { className: string }) {
+const NON_CLAIMS = [
+  "It never calls a protocol healthy because TVL rose. A surge asks you to verify whether emissions caused it.",
+  "It gives no investment advice and makes no buy, sell or avoid call. It names what to check next.",
+  "It does not read a smart contract, detect wash trading, or treat an audit count as proof of safety.",
+  "It will not invent a figure when a feed is missing. A gap is drawn as a gap, never as a reassuring zero.",
+] as const;
+
+/** Live coverage figures. A null means the read could not be made, which is
+ *  shown as a single honest reason plus `n/a` cells, not a wall of zeros.
+ *  This runs on the server inside a Suspense boundary: it is the one dynamic
+ *  region on an otherwise static page, so a cold backend streams `n/a` instead
+ *  of blocking the hero or failing the build. */
+async function CoverageBand() {
+  const coverage = await fetchCoverage();
+  const tracked = coverage ? fmtCount(coverage.protocols_tracked) : "n/a";
+  const scored = coverage ? fmtCount(coverage.scored_observations) : "n/a";
+  const days = coverage ? fmtCount(coverage.observation_days) : "n/a";
+  const cats = coverage ? fmtCount(coverage.categories) : "n/a";
+  const chains = coverage ? fmtCount(coverage.chains) : "n/a";
+  const alerts7d = coverage ? fmtCount(coverage.alerts_7d) : "n/a";
+  const chunks = coverage ? fmtCount(coverage.index_chunks) : "n/a";
+  const cadence = coverage ? `${coverage.monitor_interval_minutes} min` : "n/a";
+
+  const stats = [
+    { value: tracked, label: "protocols tracked", note: "Every protocol with a snapshot in the store right now." },
+    { value: scored, label: "scored observations", note: "Protocol-days the risk model has actually ranked." },
+    { value: days, label: "days of history", note: "Distinct observation dates behind the trend charts." },
+    { value: cats, label: "categories", note: "Distinct DeFi verticals currently on the watchlist." },
+    { value: chains, label: "chains", note: "Real chains represented across tracked protocols." },
+    { value: alerts7d, label: "alerts in 7 days", note: "Rules that fired this week, across the whole watchlist." },
+    { value: chunks, label: "retrieval chunks", note: "The corpus the grounded analyst answers from." },
+    { value: cadence, label: "monitor pass", note: "How often the scheduler re-scores the watchlist." },
+  ] as const;
+
+  const asOf = coverage?.as_of ?? coverage?.captured_at ?? null;
+
   return (
-    <svg
-      className={className}
-      viewBox="0 0 12 10"
-      fill="none"
-      aria-hidden="true"
-      focusable="false"
-    >
-      <path
-        d="M0.8 5h10M7.1 1.4 10.9 5l-3.8 3.6"
-        stroke="currentColor"
-        strokeWidth="1.35"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
+    <section className="ds-section ds-section-raise ds-stats-band" aria-labelledby="coverage-h">
+      <div className="ds-section-inner">
+        <p className="ds-eyebrow">
+          <Database size={13} strokeWidth={1.8} aria-hidden="true" />
+          Live coverage
+        </p>
+        <h2 className="ds-h2 ds-h2-sm" id="coverage-h">
+          These are the numbers the service is holding <em>right now</em>.
+        </h2>
+        <p className="ds-lede">
+          Read straight from the running database through the public
+          <code className="ds-inline-code"> /api/status </code>
+          aggregate. Nothing here is a stock figure pasted into a template.
+        </p>
+
+        {coverage === null ? (
+          <p className="ds-note" role="status">
+            <span className="ds-note-label">Not connected</span>
+            The board is not reachable from this page right now, so every figure
+            below reads <code className="ds-inline-code">n/a</code>. It is shown as
+            a gap, not as zero, exactly as the product treats a missing feed.
+          </p>
+        ) : coverage.status === "empty" ? (
+          <p className="ds-note" role="status">
+            <span className="ds-note-label">Fresh store</span>
+            The database answered, but no snapshots have been captured yet. The
+            counts below are real zeros, and the first monitor pass will fill them.
+          </p>
+        ) : null}
+
+        <dl className="ds-stats">
+          {stats.map(({ value, label, note }) => (
+            <div className="ds-stat" key={label}>
+              <dt className="ds-stat-label">{label}</dt>
+              <dd className="ds-stat-num">{value}</dd>
+              <dd className="ds-stat-note">{note}</dd>
+            </div>
+          ))}
+        </dl>
+
+        <p className="ds-coverage-meta">
+          {coverage ? (
+            <>
+              {"Snapshot as of "}
+              <code className="ds-inline-code">
+                {asOf ? new Date(asOf).toISOString().slice(0, 16).replace("T", " ") : "n/a"}
+              </code>
+              {" UTC. "}
+              <Link className="ds-inline-link" href={LINKS.docs}>
+                How coverage is measured
+                <ArrowRight size={13} strokeWidth={2} aria-hidden="true" />
+              </Link>
+            </>
+          ) : (
+            <>
+              <Link className="ds-inline-link" href={LINKS.docs}>
+                Read the methodology
+                <ArrowRight size={13} strokeWidth={2} aria-hidden="true" />
+              </Link>
+            </>
+          )}
+        </p>
+      </div>
+    </section>
+  );
+}
+
+/** The static placeholder streamed while the coverage read resolves. It carries
+ *  the band's shape so the page does not jump when the numbers arrive, and every
+ *  cell starts at `n/a`: if the read never resolves, the fallback itself is an
+ *  honest answer, not a lie of zeros. */
+function CoverageBandFallback() {
+  return (
+    <section className="ds-section ds-section-raise ds-stats-band" aria-busy="true">
+      <div className="ds-section-inner">
+        <p className="ds-eyebrow">
+          <Database size={13} strokeWidth={1.8} aria-hidden="true" />
+          Live coverage
+        </p>
+        <h2 className="ds-h2 ds-h2-sm">Counting what the service is holding.</h2>
+        <p className="ds-lede">
+          Reading the live aggregate. A gap shows as <code className="ds-inline-code">n/a</code>, never as zero.
+        </p>
+      </div>
+    </section>
   );
 }
 
 export function DeFiScopeLanding() {
-  const videoARef = useRef<HTMLVideoElement>(null);
-  const videoBRef = useRef<HTMLVideoElement>(null);
-  const headerRef = useRef<HTMLElement>(null);
-  const rootRef = useRef<HTMLDivElement>(null);
-
-  const [stuck, setStuck] = useState(false);
-  const [menuOpen, setMenuOpen] = useState(false);
-
-  /* ---------------------------------------------------------------- entrance
-     The reveal is gated on document.fonts.ready: with a block face the mask
-     would otherwise animate against invisible glyphs and the headline would
-     appear to finish before it starts. The timer is a safety net: a stalled
-     font request must never leave the page permanently blank. -------------- */
-  useEffect(() => {
-    const root = rootRef.current;
-    if (!root) return;
-
-    let settled = false;
-    let timer: number | undefined;
-
-    const reveal = () => {
-      if (settled) return;
-      settled = true;
-      root.dataset.landing = "ready";
-    };
-
-    if (typeof document.fonts?.ready?.then === "function") {
-      document.fonts.ready.then(reveal, reveal);
-      timer = window.setTimeout(reveal, 1500);
-    } else {
-      reveal();
-    }
-
-    return () => {
-      settled = true;
-      if (timer !== undefined) window.clearTimeout(timer);
-      // The page may be left mid-entrance by a fast navigation; drop the flag so
-      // a later mount starts from a clean state.
-      delete root.dataset.landing;
-    };
-  }, []);
-
-  /* ------------------------------------------------------------- cross-fade
-     A and B ping-pong: the incoming copy starts at 0 and fades in while the
-     outgoing one plays out its final FADE seconds. The overlap is scheduled
-     FADE early so the fade *finishes* at the seam. ------------------------- */
-  useEffect(() => {
-    const a = videoARef.current;
-    const b = videoBRef.current;
-    if (!a || !b) return;
-
-    const FADE = 0.9; // must match .ds-bg-video's transition duration
-    const EDGE = 0.08; // timeupdate fires ~4×/s; schedule a hair early
-    let showing = a;
-    let parked: number | undefined;
-
-    // React writes `muted` as an attribute; autoplay policy checks the property.
-    a.muted = true;
-    b.muted = true;
-
-    const play = (el: HTMLVideoElement) => {
-      try {
-        const started = el.play();
-        if (started) started.catch(() => {});
-      } catch {
-        // A decode race must never take the page down with it.
-      }
-    };
-
-    const swap = () => {
-      const next = showing === a ? b : a;
-      const prev = showing;
-
-      try {
-        next.currentTime = 0;
-      } catch {
-        // Seeking an unbuffered element can throw; play() below still works.
-      }
-      play(next);
-
-      next.classList.add(ACTIVE);
-      prev.classList.remove(ACTIVE);
-      showing = next;
-
-      // Park the hidden copy: it would otherwise keep decoding frames for
-      // nothing, which on a laptop is a measurable battery cost.
-      parked = window.setTimeout(() => {
-        try {
-          prev.pause();
-          prev.currentTime = 0;
-        } catch {
-          // Already detached — nothing to park.
-        }
-      }, FADE * 1000 + 60);
-    };
-
-    const tick = (event: Event) => {
-      const video = event.currentTarget as HTMLVideoElement;
-      if (video !== showing || video.readyState < 2) return;
-      const { duration } = video;
-      if (!Number.isFinite(duration) || duration <= FADE + EDGE) return;
-      if (duration - video.currentTime <= FADE + EDGE) swap();
-    };
-
-    const onVisible = () => {
-      if (!document.hidden && showing.paused) play(showing);
-    };
-
-    a.addEventListener("timeupdate", tick);
-    b.addEventListener("timeupdate", tick);
-    document.addEventListener("visibilitychange", onVisible);
-    play(a);
-
-    return () => {
-      a.removeEventListener("timeupdate", tick);
-      b.removeEventListener("timeupdate", tick);
-      document.removeEventListener("visibilitychange", onVisible);
-      if (parked !== undefined) window.clearTimeout(parked);
-    };
-  }, []);
-
-  /* ----------------------------------------------------------------- the bar
-     The nav starts transparent over the film and picks up a translucent bar
-     once the page has moved, so it stays legible over the sections. -------- */
-  useEffect(() => {
-    let frame = 0;
-    const onScroll = () => {
-      if (frame) return;
-      frame = window.requestAnimationFrame(() => {
-        frame = 0;
-        setStuck(window.scrollY > 24);
-      });
-    };
-    onScroll();
-    window.addEventListener("scroll", onScroll, { passive: true });
-    return () => {
-      window.removeEventListener("scroll", onScroll);
-      if (frame) window.cancelAnimationFrame(frame);
-    };
-  }, []);
-
-  /* ------------------------------------------------------------- mobile menu */
-  useEffect(() => {
-    if (!menuOpen) return;
-
-    const onPointerDown = (event: PointerEvent) => {
-      if (!headerRef.current?.contains(event.target as Node)) setMenuOpen(false);
-    };
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setMenuOpen(false);
-    };
-    // Resizing up to desktop hides the panel via CSS; drop the state too so the
-    // burger is not left claiming aria-expanded="true".
-    const onResize = () => {
-      if (window.innerWidth > 1160) setMenuOpen(false);
-    };
-
-    document.addEventListener("pointerdown", onPointerDown);
-    document.addEventListener("keydown", onKeyDown);
-    window.addEventListener("resize", onResize);
-    return () => {
-      document.removeEventListener("pointerdown", onPointerDown);
-      document.removeEventListener("keydown", onKeyDown);
-      window.removeEventListener("resize", onResize);
-    };
-  }, [menuOpen]);
-
-  const closeMenu = () => setMenuOpen(false);
-
   return (
     // `data-landing` ships in the server HTML on purpose: it is what holds the
-    // hero back until the fonts are ready, and having it rendered (rather than
-    // added later) keeps hydration honest — the effect below only flips the
-    // value, it never introduces the attribute.
-    <div className="ds-root" id="landing-root" ref={rootRef} data-landing="pending">
+    // hero back until the fonts are ready. `LandingReveal` only flips the value.
+    <div className="ds-root" id="landing-root" data-landing="pending">
+      <LandingReveal />
+
       <a className="ds-skip" href="#hero">
         Skip to content
       </a>
 
-      <header
-        ref={headerRef}
-        className={stuck ? "ds-nav ds-nav-stuck" : "ds-nav"}
-      >
-        <a className="ds-logo" href="#landing-root">
-          <span className="ds-logo-dot" aria-hidden="true" />
-          DeFiScope<span className="ds-logo-ai">AI</span>
-        </a>
-
-        <nav className="ds-nav-links" aria-label="Primary">
-          <a href="#platform">Platform</a>
-          <a href="#how">How it works</a>
-          <a href={LINKS.docs} target="_blank" rel="noreferrer">
-            Docs
-          </a>
-          <Link href={LINKS.about}>About</Link>
-        </nav>
-
-        <div className="ds-nav-actions">
-          <Link className="ds-btn ds-btn-login" href={LINKS.login}>
-            Sign in
-          </Link>
-          <Link className="ds-btn ds-btn-nav-start" href={LINKS.board}>
-            Open the board
-            <Arrow className="ds-arrow" />
-          </Link>
-        </div>
-
-        <button
-          type="button"
-          className={menuOpen ? "ds-burger ds-burger-open" : "ds-burger"}
-          aria-label={menuOpen ? "Close menu" : "Open menu"}
-          aria-expanded={menuOpen}
-          aria-controls="landing-menu"
-          onClick={() => setMenuOpen((open) => !open)}
-        >
-          <span className="ds-burger-bars" />
-        </button>
-
-        <nav
-          id="landing-menu"
-          className={menuOpen ? "ds-menu ds-menu-open" : "ds-menu"}
-          aria-label="Mobile"
-          onClick={closeMenu}
-        >
-          <a href="#platform">Platform</a>
-          <a href="#how">How it works</a>
-          <a href={LINKS.docs} target="_blank" rel="noreferrer">
-            Docs
-          </a>
-          <Link href={LINKS.about}>About</Link>
-          <div className="ds-divider" />
-          <Link href={LINKS.login}>Sign in</Link>
-          <Link className="ds-m-start" href={LINKS.board}>
-            Open the board
-            <Arrow className="ds-arrow" />
-          </Link>
-        </nav>
-      </header>
+      <LandingNav current="home" anchors={{ platform: "#platform", how: "#how" }} />
 
       <main>
         <section className="ds-hero" id="hero">
-          <div
-            className="ds-bg"
-            role="img"
-            aria-label="A stylised globe of Earth rendered as a green dot matrix against a starfield, slowly rotating"
-          >
-            <video
-              ref={videoARef}
-              className="ds-bg-video ds-is-active"
-              poster={POSTER_SRC}
-              autoPlay
-              muted
-              loop
-              playsInline
-              preload="auto"
-              disablePictureInPicture
-              aria-hidden="true"
-              tabIndex={-1}
-            >
-              <source src={VIDEO_SRC} type="video/mp4" />
-            </video>
-            <video
-              ref={videoBRef}
-              className="ds-bg-video"
-              poster={POSTER_SRC}
-              muted
-              loop
-              playsInline
-              preload="auto"
-              disablePictureInPicture
-              aria-hidden="true"
-              tabIndex={-1}
-            >
-              <source src={VIDEO_SRC} type="video/mp4" />
-            </video>
-          </div>
+          <LandingFilm />
 
           <div className="ds-tint" aria-hidden="true" />
 
@@ -396,10 +241,7 @@ export function DeFiScopeLanding() {
             </p>
 
             <div className="ds-ctas">
-              <Link
-                className="ds-btn ds-btn-lg ds-btn-primary"
-                href={LINKS.board}
-              >
+              <Link className="ds-btn ds-btn-lg ds-btn-primary" href={LINKS.board}>
                 Open the board
                 <Arrow className="ds-arrow" />
               </Link>
@@ -411,6 +253,10 @@ export function DeFiScopeLanding() {
           </div>
         </section>
 
+        <Suspense fallback={<CoverageBandFallback />}>
+          <CoverageBand />
+        </Suspense>
+
         <section className="ds-section" id="platform">
           <div className="ds-section-inner">
             <p className="ds-eyebrow">Platform</p>
@@ -420,10 +266,10 @@ export function DeFiScopeLanding() {
               <em>due-diligence</em> pass.
             </h2>
             <p className="ds-lede">
-              A scored market board, per-protocol evidence, rule-based
-              monitoring and a grounded analyst: four views over the same
-              numbers. Every figure traces back to a pure function with a test
-              behind it, not to a model&apos;s guess.
+              A scored market board, per-protocol evidence, rule-based monitoring
+              and a grounded analyst: four views over the same numbers. Every
+              figure traces back to a pure function with a test behind it, not to
+              a model&apos;s guess.
             </p>
 
             <ul className="ds-cards">
@@ -437,17 +283,148 @@ export function DeFiScopeLanding() {
                 </li>
               ))}
             </ul>
+
+            <p className="ds-paragraph">
+              The full manual now lives in the product, not in a Swagger page.
+              <Link className="ds-inline-link" href={LINKS.docs}>
+                Read the documentation
+                <ArrowRight size={13} strokeWidth={2} aria-hidden="true" />
+              </Link>
+            </p>
           </div>
         </section>
 
         <section className="ds-section ds-section-raise" id="how">
           <div className="ds-section-inner">
-            <p className="ds-eyebrow">How it works</p>
-            <h2 className="ds-h2">From raw aggregate to a defended number.</h2>
+            <p className="ds-eyebrow">Anatomy of a score</p>
+            <h2 className="ds-h2">
+              Seven signals, and what each one <em>cannot</em> prove.
+            </h2>
+            <p className="ds-lede">
+              The composite is a weighted mean over the indicators that could be
+              computed. Their weights sum to 1.00, and no single one decides a band
+              alone. The right-hand column is the reason the table exists.
+            </p>
+
+            <div className="ds-table-wrap" role="region" aria-label="Indicator weights, anchors and limitations" tabIndex={0}>
+              <table className="ds-table">
+                <thead>
+                  <tr>
+                    <th scope="col">Indicator</th>
+                    <th scope="col">Weight</th>
+                    <th scope="col">Anchor, safe to risky</th>
+                    <th scope="col">What it cannot establish</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {INDICATORS.map((ind) => (
+                    <tr key={ind.key}>
+                      <th scope="row">{ind.name}</th>
+                      <td className="ds-td-weight">{ind.weight}</td>
+                      <td className="ds-td-anchor">{ind.anchor}</td>
+                      <td className="ds-td-cannot">{ind.cannot}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="ds-bands" role="list" aria-label="Risk bands">
+              {BANDS.map(({ band, range, tone }) => (
+                <span className={`ds-band ${tone}`} key={band} role="listitem">
+                  <span className="ds-band-dot" aria-hidden="true" />
+                  <span className="ds-band-name">{band}</span>
+                  <span className="ds-band-range">{range}</span>
+                </span>
+              ))}
+            </div>
+
+            <p className="ds-paragraph">
+              The thresholds and the full anchor spans are documented.
+              <Link className="ds-inline-link" href={LINKS.docs_scoring}>
+                See the scoring reference
+                <ArrowRight size={13} strokeWidth={2} aria-hidden="true" />
+              </Link>
+            </p>
+          </div>
+        </section>
+
+        <section className="ds-section" id="monitoring">
+          <div className="ds-section-inner">
+            <p className="ds-eyebrow">
+              <BellRing size={13} strokeWidth={1.8} aria-hidden="true" />
+              Monitoring
+            </p>
+            <h2 className="ds-h2">
+              Six rules, each storing the value that <em>made it fire.</em>
+            </h2>
+            <p className="ds-lede">
+              An alert is a claim you can check, not a vibe: it keeps the metric it
+              watched, the observed value and the threshold. Ids are deterministic
+              per protocol, rule and day, so a re-run cannot duplicate a finding.
+            </p>
+
+            <div className="ds-table-wrap" role="region" aria-label="Monitoring rules" tabIndex={0}>
+              <table className="ds-table">
+                <thead>
+                  <tr>
+                    <th scope="col">Rule</th>
+                    <th scope="col">Severity</th>
+                    <th scope="col">Fires when</th>
+                    <th scope="col">Default</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {RULES.map((r) => (
+                    <tr key={r.rule}>
+                      <th scope="row">
+                        <code className="ds-inline-code">{r.rule}</code>
+                      </th>
+                      <td>{r.severity}</td>
+                      <td>{r.trigger}</td>
+                      <td className="ds-td-weight">{r.value}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        <section className="ds-section ds-section-raise" id="data">
+          <div className="ds-section-inner">
+            <p className="ds-eyebrow">
+              <Database size={13} strokeWidth={1.8} aria-hidden="true" />
+              Data and its limits
+            </p>
+            <h2 className="ds-h2">
+              Two providers, and no source <em>without its weakness.</em>
+            </h2>
+            <p className="ds-lede">
+              A source that cannot answer a question is named as unable, not quietly
+              dropped. TVL is USD-denominated, so it moves with price as well as
+              usage: the caveat that bounds every indicator on this page.
+            </p>
+
+            <ul className="ds-sources">
+              {SOURCES.map((s) => (
+                <li className="ds-source" key={s.name}>
+                  <span className="ds-source-name">{s.name}</span>
+                  <p className="ds-source-used">
+                    <span className="ds-tag">Used for</span>
+                    {s.usedFor}
+                  </p>
+                  <p className="ds-source-limit">
+                    <span className="ds-tag ds-tag-warn">Limitation</span>
+                    {s.limit}
+                  </p>
+                </li>
+              ))}
+            </ul>
 
             <div className="ds-how-grid">
               <ol className="ds-steps">
-                {STEPS.map(({ title, text }) => (
+                {PIPELINE.map(({ title, text }) => (
                   <li className="ds-step" key={title}>
                     <h3 className="ds-step-title">{title}</h3>
                     <p className="ds-step-text">{text}</p>
@@ -455,49 +432,64 @@ export function DeFiScopeLanding() {
                 ))}
               </ol>
 
-              <pre className="ds-code" aria-label="Example protocol research response">
+              <pre className="ds-code" aria-label="Shape of the public aggregate status response">
                 <code>
                   <span className="ds-code-line">
-                    <span className="ds-code-verb">GET</span> /api/protocols/aave-v3
-                  </span>
-                  <span className="ds-code-line">
-                    <span className="ds-code-key">Authorization:</span> Bearer …
+                    <span className="ds-code-verb">GET</span> /api/status
                   </span>
                   <span className="ds-code-line"> </span>
                   <span className="ds-code-line">{"{"}</span>
                   <span className="ds-code-line">
                     {"  "}
-                    <span className="ds-code-key">{'"slug"'}</span>:{" "}
-                    <span className="ds-code-str">{'"aave-v3"'}</span>,
+                    <span className="ds-code-key">{'"status"'}</span>:{" "}
+                    <span className="ds-code-str">{'"ok"'}</span>,
                   </span>
                   <span className="ds-code-line">
                     {"  "}
-                    <span className="ds-code-key">{'"as_of"'}</span>:{" "}
-                    <span className="ds-code-str">{'"2026-10-30"'}</span>,
+                    <span className="ds-code-key">{'"protocols_tracked"'}</span>: {""}
+                    <span className="ds-code-str">64</span>,
                   </span>
                   <span className="ds-code-line">
                     {"  "}
-                    <span className="ds-code-key">{'"risk"'}</span>: {"{"}
+                    <span className="ds-code-key">{'"scored_observations"'}</span>: {""}
+                    <span className="ds-code-str">1820</span>,
                   </span>
                   <span className="ds-code-line">
-                    {"    "}
-                    <span className="ds-code-key">{'"composite_score"'}</span>:{" "}
-                    <span className="ds-code-str">34.2</span>,
+                    {"  "}
+                    <span className="ds-code-key">{'"monitor_interval_minutes"'}</span>:{" "}
+                    <span className="ds-code-str">30</span>,
                   </span>
                   <span className="ds-code-line">
-                    {"    "}
-                    <span className="ds-code-key">{'"band"'}</span>:{" "}
-                    <span className="ds-code-str">{'"moderate"'}</span>,
+                    {"  "}
+                    <span className="ds-code-key">{'"as_of"'}</span>: {""}
+                    <span className="ds-code-str">{'"2026-10-30"'}</span>
                   </span>
-                  <span className="ds-code-line">
-                    {"    "}
-                    <span className="ds-code-key">{'"data_gaps"'}</span>: []
-                  </span>
-                  <span className="ds-code-line">{"  }"}</span>
                   <span className="ds-code-line">{"}"}</span>
                 </code>
               </pre>
             </div>
+          </div>
+        </section>
+
+        <section className="ds-section" id="limits">
+          <div className="ds-section-inner">
+            <p className="ds-eyebrow">Honest limits</p>
+            <h2 className="ds-h2">
+              What it will <em>not</em> claim.
+            </h2>
+            <p className="ds-lede">
+              The same honesty that keeps a missing feed a gap bounds what a result
+              can be. These are out of scope by design, not by omission, and every
+              one of them surfaces in the product as a named data gap.
+            </p>
+
+            <ul className="ds-limits">
+              {NON_CLAIMS.map((line) => (
+                <li className="ds-limit" key={line}>
+                  <span>{line}</span>
+                </li>
+              ))}
+            </ul>
           </div>
         </section>
 
@@ -507,17 +499,21 @@ export function DeFiScopeLanding() {
               It flags the reason to investigate.
             </h2>
             <p className="ds-contact-text">
-              DeFiScope never calls a protocol healthy because TVL rose. It
-              scores what it can measure, shows what it could not, and tells you
-              what to check next.
+              DeFiScope never calls a protocol healthy because TVL rose. It scores
+              what it can measure, shows what it could not, and tells you what to
+              check next.
             </p>
             <div className="ds-contact-actions">
               <Link className="ds-btn ds-btn-primary" href={LINKS.board}>
                 Open the board
                 <Arrow className="ds-arrow" />
               </Link>
+              <Link className="ds-btn ds-btn-ghost" href={LINKS.docs}>
+                Read the docs
+                <Arrow className="ds-arrow" />
+              </Link>
               <Link className="ds-btn ds-btn-ghost" href={LINKS.about}>
-                Read the methodology
+                The long-form About
                 <Arrow className="ds-arrow" />
               </Link>
             </div>
@@ -525,21 +521,7 @@ export function DeFiScopeLanding() {
         </section>
       </main>
 
-      <footer className="ds-footer">
-        <div className="ds-footer-inner">
-          {/* No `new Date()` here: under Cache Components that is an unstable
-              value the prerender refuses to bake. The year adds nothing a
-              copyright line needs. */}
-          <span>© DeFiScope AI. Research, not investment advice.</span>
-          <div className="ds-footer-links">
-            <Link href={LINKS.about}>Methodology</Link>
-            <a href={LINKS.docs} target="_blank" rel="noreferrer">
-              API docs
-            </a>
-            <Link href={LINKS.login}>Sign in</Link>
-          </div>
-        </div>
-      </footer>
+      <LandingFooter />
     </div>
   );
 }

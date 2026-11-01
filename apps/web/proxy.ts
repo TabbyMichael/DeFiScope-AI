@@ -21,9 +21,12 @@ const AUTH_MODE = (process.env.DEFISCOPE_AUTH_MODE ?? "demo").toLowerCase();
 /** Paths that must stay reachable without a session. */
 function isPublic(pathname: string): boolean {
   if (pathname === "/login") return true;
-  // The marketing page has no data to leak — a visitor's only credential is
-  // curiosity. Keeping it public is what lets the front door exist at all.
-  if (pathname === "/welcome") return true;
+  // The marketing pages have no data to leak: a visitor's only credential is
+  // curiosity. Keeping the whole `/welcome` subtree public is what lets the
+  // front door (and the About page it links to) exist at all. Matching the
+  // subtree rather than the single path matters: `/welcome` alone would bounce
+  // `/welcome/about` straight into a login form.
+  if (pathname === "/welcome" || pathname.startsWith("/welcome/")) return true;
   if (pathname.startsWith("/api/auth/")) return true;
   if (pathname === "/icon.svg" || pathname === "/favicon.ico") return true;
   return false;

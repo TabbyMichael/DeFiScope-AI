@@ -357,3 +357,64 @@ class CatalogSyncStats(BaseModel):
     duration_seconds: float
     completed_at: str
     errors: list[str] = Field(default_factory=list)
+
+
+# --- Public coverage status (landing page aggregate) -------------------------
+
+
+class CoverageStatus(BaseModel):
+    """Public, aggregate view of what the service has actually observed.
+
+    Every count is nullable, and the null is load-bearing: ``null`` means
+    "could not be measured" (the store was unreachable, or a probe failed)
+    while ``0`` means "measured, and there are none". A landing page that
+    renders this must show the difference - reporting zero for an unreachable
+    database would be the exact lie the rest of the product is built to avoid.
+
+    No row-level data and no secrets are exposed here: configuration flags are
+    reported as booleans (``llm_configured``), never as values."""
+
+    # "ok" (measured, rows exist), "empty" (measured, nothing stored yet) or
+    # "unavailable" (the store did not answer; every count below is null).
+    status: Literal["ok", "empty", "unavailable"]
+    # ISO timestamp of this observation, and the newest capture in the store.
+    # Both null when the store could not be read.
+    as_of: str | None = None
+    captured_at: str | None = None
+
+    # Protocol coverage, from protocol_snapshots.
+    protocols_tracked: int | None = None
+    protocols_scored: int | None = None
+    observation_days: int | None = None
+    categories: int | None = None
+    chains: int | None = None
+    # Snapshot rows carrying a composite score, i.e. the observations the risk
+    # model has actually ranked (not just protocols - a protocol can hold both
+    # scored and backfilled rows).
+    scored_observations: int | None = None
+    # Risk band -> number of protocols whose latest snapshot sits in that band.
+    bands: dict[str, int] | None = None
+
+    # Alerting history, from alert_records.
+    alerts_total: int | None = None
+    alerts_7d: int | None = None
+    alerts_by_severity: dict[str, int] | None = None
+
+    # On-chain (Dune) coverage, from onchain_observations. Separate from the
+    # TVL counts above because it has a different grain and its absence is a
+    # configuration state, not a data gap.
+    onchain_observations: int | None = None
+    onchain_protocols: int | None = None
+    onchain_chains: int | None = None
+
+    # Retrieval index size for the ask-the-analyst chat, from chat_chunks.
+    index_chunks: int | None = None
+
+    # Capability flags. Safe to publish: they reveal only whether a feature is
+    # switched on, never which model, host or credential is in use.
+    llm_configured: bool = False
+    onchain_configured: bool = False
+    monitor_interval_minutes: int = 30
+    # Curated watchlist size from configuration (not from the DB), so a cold
+    # empty store still shows what the service is meant to cover.
+    protocols_curated: int = 0
