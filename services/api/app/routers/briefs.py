@@ -13,37 +13,43 @@ from urllib.parse import quote
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
+from sqlalchemy.orm import Session
 
-from app.clients.defillama import DefiLlamaError
+from app.db import get_session
 from app.schemas import ResearchBrief
 from app.security.deps import enforce, require
 from app.security.policy import check_brief_export, check_scope
 from app.security.principal import Subject
 from app.security.rbac import BRIEFS_EXPORT, BRIEFS_READ
+from app.services import detail
 from app.services.briefs import build_brief
 from app.services.export import VALID_FORMATS, render
-from app.services.protocols import ProtocolResearchService, pack_to_overview
 
 router = APIRouter(prefix="/api/briefs", tags=["briefs"])
-
-
-def research_service(request: Request) -> ProtocolResearchService:
-    return request.app.state.research_service
 
 
 def http_client(request: Request) -> httpx.AsyncClient:
     return request.app.state.http
 
 
-def _enforce_scope(subject: Subject, pack, slug: str) -> None:
+def _load_or_404(slug: str, session: Session) -> detail.DetailPack:
+    """DB-first brief source: the same pack the detail page renders. A slug with
+    neither a snapshot nor a catalog row is a genuine 404; a listed-but-uncaptured
+    slug loads with gap fields and the template brief states them."""
+    try:
+        return detail.load_detail(session, slug)
+    except detail.ProtocolUnknown as exc:
+        raise HTTPException(404, f"unknown protocol '{exc.args[0]}'") from exc
+
+
+def _enforce_scope(subject: Subject, dp: detail.DetailPack, slug: str) -> None:
     """Briefs inherit the protocol's attributes - no separate policy."""
-    overview = pack_to_overview(pack)
     enforce(
         check_scope(
             subject,
-            category=overview.category,
-            chain=overview.top_chain,
-            resource=f"'{slug}' ({overview.category or 'uncategorised'})",
+            category=dp.overview.category,
+            chain=dp.overview.top_chain,
+            resource=f"'{slug}' ({dp.overview.category or 'uncategorised'})",
         )
     )
 
@@ -51,27 +57,22 @@ def _enforce_scope(subject: Subject, pack, slug: str) -> None:
 @router.get("/{slug}", response_model=ResearchBrief)
 async def protocol_brief(
     slug: str,
-    request: Request,
     subject: Subject = Depends(require(BRIEFS_READ)),
-    svc: ProtocolResearchService = Depends(research_service),
     http: httpx.AsyncClient = Depends(http_client),
+    session: Session = Depends(get_session),
 ):
-    try:
-        pack = await svc.get_pack(slug, http)
-    except DefiLlamaError as exc:
-        raise HTTPException(404, str(exc)) from exc
-    _enforce_scope(subject, pack, slug)
-    return await build_brief(pack, http)
+    dp = _load_or_404(slug, session)
+    _enforce_scope(subject, dp, slug)
+    return await build_brief(dp, http)
 
 
 @router.get("/{slug}/export", response_class=Response)
 async def export_brief(
     slug: str,
-    request: Request,
     format: str = Query("md", description="download format: md | csv | pdf"),
     subject: Subject = Depends(require(BRIEFS_EXPORT)),
-    svc: ProtocolResearchService = Depends(research_service),
     http: httpx.AsyncClient = Depends(http_client),
+    session: Session = Depends(get_session),
 ):
     """Render the brief for download as Markdown, CSV or PDF.
 
@@ -88,12 +89,9 @@ async def export_brief(
     """
     if format not in VALID_FORMATS:
         raise HTTPException(400, f"unsupported format {format!r}; expected one of {VALID_FORMATS}")
-    try:
-        pack = await svc.get_pack(slug, http)
-    except DefiLlamaError as exc:
-        raise HTTPException(404, str(exc)) from exc
-    _enforce_scope(subject, pack, slug)
-    brief = await build_brief(pack, http)
+    dp = _load_or_404(slug, session)
+    _enforce_scope(subject, dp, slug)
+    brief = await build_brief(dp, http)
     enforce(
         check_brief_export(
             subject,

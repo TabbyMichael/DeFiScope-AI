@@ -94,7 +94,14 @@ def _scope_rows(rows: list[ProtocolSnapshot], scope: Scope | None) -> list[Proto
 
 
 def latest_rows(session: Session, scope: Scope | None = None) -> list[ProtocolSnapshot]:
-    """Newest snapshot per slug via a max(date) group-by joined back.
+    """Newest *monitored* snapshot per slug via a max(date) group-by joined back.
+
+    Board-integrity guard: catalog pre-seed rows (``monitored = 0``) persist
+    detail-page data for protocols the watchlist deliberately does not track
+    (CEX/Bridge/Chain totals). They must not enter board totals, band counts or
+    movers, so they are excluded here - the single latest-row source every
+    board read funnels through. ``coalesce`` keeps legacy NULL rows (written
+    before the column existed) in the board, matching the backfill semantics.
 
     The join can theoretically return more than one row per slug if duplicate
     (slug, date) rows exist (e.g. from a pre-unique-constraint database or a
@@ -104,6 +111,7 @@ def latest_rows(session: Session, scope: Scope | None = None) -> list[ProtocolSn
             ProtocolSnapshot.slug,
             func.max(ProtocolSnapshot.date).label("max_date"),
         )
+        .filter(func.coalesce(ProtocolSnapshot.monitored, 1) != 0)
         .group_by(ProtocolSnapshot.slug)
         .subquery()
     )
@@ -116,6 +124,7 @@ def latest_rows(session: Session, scope: Scope | None = None) -> list[ProtocolSn
                 ProtocolSnapshot.date == sub.c.max_date,
             ),
         )
+        .filter(func.coalesce(ProtocolSnapshot.monitored, 1) != 0)
         .order_by(ProtocolSnapshot.tvl.desc())
         .all()
     )
@@ -137,11 +146,18 @@ def latest_row_for(session: Session, slug: str) -> ProtocolSnapshot | None:
 
 
 def freshness_hours(session: Session) -> float | None:
-    """Hours since the newest capture, or None when nothing is stored yet.
+    """Hours since the newest *monitored* capture, or None when nothing is
+    stored yet. Pre-seed rows are captured continuously by the seed loop, so
+    counting them here would keep a stale board forever looking fresh and
+    suppress the dashboard's own hydration pass.
 
     Kept here (next to ``STALE_AFTER``) so the manual-run policy and the
     dashboard's own staleness check cannot drift apart."""
-    newest = session.query(func.max(ProtocolSnapshot.captured_at)).scalar()
+    newest = (
+        session.query(func.max(ProtocolSnapshot.captured_at))
+        .filter(func.coalesce(ProtocolSnapshot.monitored, 1) != 0)
+        .scalar()
+    )
     if newest is None:
         return None
     if newest.tzinfo is None:
@@ -226,9 +242,19 @@ def aggregate_history(
     query = session.query(
         ProtocolSnapshot.date,
         func.sum(ProtocolSnapshot.tvl).label("total"),
-    )
+    ).filter(func.coalesce(ProtocolSnapshot.monitored, 1) != 0)
     if slugs is not None:
         query = query.filter(ProtocolSnapshot.slug.in_(slugs))
+    # Unrestricted board: exclude unmonitored pre-seed rows by slug, since the
+    # seed loop can persist protocols (CEX totals) the watchlist excludes.
+    if slugs is None:
+        monitored_sub = (
+            session.query(ProtocolSnapshot.slug)
+            .filter(func.coalesce(ProtocolSnapshot.monitored, 1) != 0)
+            .distinct()
+            .scalar_subquery()
+        )
+        query = query.filter(ProtocolSnapshot.slug.in_(monitored_sub))
     rows = (
         query.group_by(ProtocolSnapshot.date)
         .order_by(ProtocolSnapshot.date.desc())

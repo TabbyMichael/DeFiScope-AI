@@ -19,19 +19,6 @@ async function CompareContent({
 }) {
   const { slugs, truncated } = parseSlugs((await searchParams).slugs);
 
-  // Picker options come from the server so the browser never hits API_URL.
-  let options: CompareOption[] = [];
-  try {
-    const protocols = await api.protocols();
-    options = protocols.map((p) => ({
-      slug: p.slug,
-      name: p.name,
-      category: p.category ?? null,
-    }));
-  } catch {
-    options = []; // directory unavailable, so the picker degrades to empty and the page still renders
-  }
-
   // Resolve each selected slug to a column; a failing slug becomes "unavailable".
   const items: CompareItem[] = await Promise.all(
     slugs.map(async (slug) => {
@@ -43,6 +30,15 @@ async function CompareContent({
       }
     }),
   );
+
+  // Labels for the selected badges, resolved server-side so the picker never has
+  // to keep the whole catalog around just to name a chosen protocol. The picker
+  // itself searches the full discovery catalog on demand via /api/catalog.
+  const selected: CompareOption[] = items.map((it) => ({
+    slug: it.slug,
+    name: it.data?.name ?? it.slug,
+    category: it.data?.category ?? null,
+  }));
 
   return (
     <div className="space-y-6">
@@ -56,7 +52,7 @@ async function CompareContent({
             {slugs.length}/{MAX_COMPARE}
           </span>
         </div>
-        <ComparePicker options={options} />
+        <ComparePicker selected={selected} />
         {truncated && (
           <p className="text-xs text-yellow-700 dark:text-yellow-400">
             Only the first {MAX_COMPARE} protocols are compared. Extra slugs in
@@ -65,17 +61,7 @@ async function CompareContent({
         )}
       </div>
 
-      {options.length === 0 ? (
-        <div className="rounded-lg border border-red-500/40 bg-red-500/10 p-4 text-sm">
-          <h2 className="mb-1 font-semibold text-red-600 dark:text-red-300">
-            API unavailable
-          </h2>
-          <p className="text-red-700/80 dark:text-red-200/80">
-            Could not load the protocol directory. Start the backend to compare
-            protocols.
-          </p>
-        </div>
-      ) : slugs.length === 0 ? (
+      {slugs.length === 0 ? (
         <div className="flex flex-col items-center gap-2 rounded-lg border border-dashed py-14 text-center">
           <GitCompare className="size-6 text-muted-foreground" />
           <p className="text-sm font-medium text-foreground">

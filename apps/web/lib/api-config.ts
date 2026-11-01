@@ -2,8 +2,8 @@
  * Client-safe API configuration and formatting helpers.
  *
  * This module must stay free of `next/headers` and any other server-only import:
- * client components (`chat-panel.tsx`, `stat-cards.tsx`, `protocol-table.tsx`,
- * `compare-matrix.tsx`, `risk-watchlist.tsx`) pull from here, while
+ * client components (`chat-panel.tsx`, `stat-cards.tsx`, `protocol-explorer.tsx`,
+ * `compare-matrix.tsx`, `watchlist-board.tsx`) pull from here, while
  * `lib/api.ts` — which reads the session cookie — pulls from here *and* adds the
  * server-only plumbing. Keeping the split means the browser bundle never
  * accidentally imports a `cookies()` accessor.

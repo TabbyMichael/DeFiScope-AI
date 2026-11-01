@@ -1,11 +1,12 @@
 import { Suspense } from "react";
+import Link from "next/link";
 import { AlertTriangle } from "lucide-react";
 
 import TvlChart from "@/components/TvlChart";
 import AlertFeed from "@/components/dashboard/alert-feed";
-import ProtocolTable from "@/components/dashboard/protocol-table";
-import RiskWatchlist from "@/components/dashboard/risk-watchlist";
+import ProtocolExplorer from "@/components/dashboard/protocol-explorer";
 import StatCards from "@/components/dashboard/stat-cards";
+import WatchlistBoard from "@/components/dashboard/watchlist-board";
 import {
   Card,
   CardContent,
@@ -15,17 +16,61 @@ import {
 } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { api } from "@/lib/api";
-import type { DashboardResponse } from "@/lib/types";
+import {
+  parseExplorerState,
+  toCatalogQuery,
+  type ExplorerState,
+  type SearchParamRecord,
+} from "@/lib/explorer";
+import type {
+  CatalogFacets,
+  DashboardResponse,
+  ProtocolCatalogPage,
+} from "@/lib/types";
+
+const EMPTY_FACETS: CatalogFacets = { categories: [], chains: [] };
+
+// The board's "Protocols" section is backed by the *full discovery catalog*, not
+// just the monitored set: thousands of protocols, paginated entirely server-side.
+// Only one page ever reaches the browser; the client component drives subsequent
+// pages/filters through the same-origin /api/catalog proxy. Fetched independently
+// of the monitored board data so a catalog hiccup never blanks the whole page.
+async function ProtocolsCatalogSection({ state }: { state: ExplorerState }) {
+  const [pageResult, facetsResult] = await Promise.allSettled([
+    api.protocols(toCatalogQuery(state)),
+    api.protocolFacets(),
+  ]);
+  const page: ProtocolCatalogPage | null =
+    pageResult.status === "fulfilled" ? pageResult.value : null;
+  const error =
+    pageResult.status === "rejected"
+      ? pageResult.reason instanceof Error
+        ? pageResult.reason.message
+        : String(pageResult.reason)
+      : null;
+  const facets: CatalogFacets =
+    facetsResult.status === "fulfilled" ? facetsResult.value : EMPTY_FACETS;
+  return (
+    <ProtocolExplorer
+      initialState={state}
+      initialPage={page}
+      facets={facets}
+      initialError={error}
+      basePath="/"
+    />
+  );
+}
 
 async function DashboardContent({
   searchParams,
 }: {
-  searchParams: Promise<{ band?: string }>;
+  searchParams: Promise<SearchParamRecord>;
 }) {
-  // Read the (optional) band deep-link INSIDE the Suspense boundary: Next 16
-  // Cache Components treats `searchParams` as runtime data, so accessing it in
-  // the page shell (outside <Suspense>) would block prerendering.
-  const { band: initialBand } = await searchParams;
+  // Read the catalog view state (search/sort/filters/page + the legacy band
+  // deep-link) INSIDE the Suspense boundary: Next 16 Cache Components treats
+  // `searchParams` as runtime data, so accessing it in the page shell (outside
+  // <Suspense>) would block prerendering.
+  const catalogState = parseExplorerState(await searchParams);
   let data: DashboardResponse | null = null;
   let error: string | null = null;
   try {
@@ -72,16 +117,36 @@ async function DashboardContent({
 
       <div className="grid gap-6 lg:grid-cols-3">
         <div className="lg:col-span-2">
-          <div id="protocols" className="scroll-mt-4">
-            <ProtocolTable
-              key={initialBand ?? "all"}
-              protocols={data.protocols}
-              initialBand={initialBand}
-            />
+          <div id="protocols" className="scroll-mt-4 space-y-3">
+            <div className="flex items-baseline justify-between gap-4">
+              <h2 className="text-lg font-semibold tracking-tight">
+                Protocols
+                <span className="ml-2 text-sm font-normal text-muted-foreground">
+                  full discovery catalog
+                </span>
+              </h2>
+              <Link
+                href="/explore"
+                className="shrink-0 text-xs text-muted-foreground underline-offset-2 hover:underline"
+              >
+                Open explorer →
+              </Link>
+            </div>
+            <Suspense fallback={<Skeleton className="h-[440px] w-full rounded-lg" />}>
+              <ProtocolsCatalogSection
+                key={JSON.stringify(catalogState)}
+                state={catalogState}
+              />
+            </Suspense>
           </div>
         </div>
         <div className="space-y-6">
-          <RiskWatchlist protocols={data.protocols} />
+          <WatchlistBoard
+            protocols={data.protocols}
+            stats={data.stats}
+            asOf={data.as_of}
+            variant="section"
+          />
           <AlertFeed alerts={data.alerts} withheld={data.withheld_alerts} />
         </div>
       </div>
@@ -127,7 +192,7 @@ function DashboardFallback() {
 export default function DashboardPage({
   searchParams,
 }: {
-  searchParams: Promise<{ band?: string }>;
+  searchParams: Promise<SearchParamRecord>;
 }) {
   return (
     <Suspense fallback={<DashboardFallback />}>

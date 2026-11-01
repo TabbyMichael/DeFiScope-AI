@@ -15,6 +15,51 @@ from sqlalchemy import inspect, text
 from sqlalchemy.exc import IntegrityError
 
 
+def test_trgm_index_ddl_is_valid_postgres():
+    """The search accelerator only activates on Postgres, which the SQLite test
+    engine can never exercise. Assert the exact DDL shape compiles to a valid
+    trigram GIN for PostgreSQL - against a throwaway table, so the shared
+    ``ProtocolCatalog`` metadata is never mutated by this test."""
+    from sqlalchemy import Column, Index, MetaData, String, Table
+    from sqlalchemy.dialects import postgresql
+    from sqlalchemy.schema import CreateIndex
+
+    scratch = MetaData()
+    table = Table("scratch_catalog", scratch, Column("name", String))
+    idx = Index(
+        "ix_scratch_name_trgm",
+        table.c.name,
+        postgresql_using="gin",
+        postgresql_ops={"name": "gin_trgm_ops"},
+    )
+    ddl = str(CreateIndex(idx).compile(dialect=postgresql.dialect()))
+    assert "USING gin" in ddl
+    assert "gin_trgm_ops" in ddl
+
+
+def test_catalog_trgm_indexes_match_dialect():
+    """The Phase 0 baseline justified a Postgres-only trigram GIN for search. On
+    SQLite that accelerator must be absent (no over-indexing); on Postgres it
+    must be present and built by init_db(). Assert whichever the test engine is.
+    """
+    Base.metadata.drop_all(engine)
+    init_db()  # must not raise on either dialect
+    try:
+        insp = inspect(engine)
+        assert "protocol_catalog" in insp.get_table_names()
+        index_names = {i["name"] for i in insp.get_indexes("protocol_catalog")}
+        trgm_present = "ix_protocol_catalog_name_trgm" in index_names
+        if engine.dialect.name == "postgresql":
+            assert trgm_present, "Postgres must build the search accelerator"
+        else:
+            assert not trgm_present, "SQLite must stay lean (no GIN)"
+        # The ordinary, portable indexes the Explorer relies on are always there.
+        assert "ix_protocol_catalog_name" in index_names
+        assert "ix_protocol_catalog_tvl" in index_names
+    finally:
+        Base.metadata.drop_all(engine)
+
+
 def test_init_db_adds_missing_columns_to_existing_table():
     # Recreate ONLY the pre-change (legacy) schema, as an already-deployed DB
     # would have: the new rich columns are absent.

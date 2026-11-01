@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Activity, Bell, BookText, GitCompare, LayoutDashboard, MessageSquareText } from "lucide-react";
+import { Activity, Bell, BookText, GitCompare, LayoutDashboard, MessageSquareText, Search, ShieldAlert } from "lucide-react";
 
 import {
   Sidebar,
@@ -19,8 +19,10 @@ import {
 
 const NAV = [
   { title: "Overview", href: "/", icon: LayoutDashboard },
+  { title: "Explorer", href: "/explore", icon: Search },
   { title: "Ask the analyst", href: "/ask", icon: MessageSquareText },
   { title: "Alerts", href: "/alerts", icon: Bell },
+  { title: "Watchlist", href: "/watchlist", icon: ShieldAlert },
   { title: "Compare", href: "/compare", icon: GitCompare },
   { title: "Methodology", href: "/about", icon: BookText },
 ];

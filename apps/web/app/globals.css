@@ -262,3 +262,29 @@ body {
     animation: none;
   }
 }
+
+/* ============================================================================
+   Watchlist board risk meter
+   ----------------------------------------------------------------------------
+   A composite-score bar that grows in from the left on mount. The fill width is
+   set inline per row; only the reveal is animated, so a reduced-motion viewer
+   simply sees the bar at its final width with no motion. */
+@keyframes wl-meter-grow {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+
+.wl-meter {
+  transform-origin: left center;
+  animation: wl-meter-grow 0.9s cubic-bezier(0.16, 0.84, 0.24, 1) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wl-meter {
+    animation: none;
+  }
+}

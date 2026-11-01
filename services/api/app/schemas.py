@@ -2,9 +2,24 @@
 
 from __future__ import annotations
 
+from enum import IntEnum
 from typing import Literal
 
 from pydantic import BaseModel, Field
+
+
+class CatalogPageSize(IntEnum):
+    """Closed set of page sizes the catalog Explorer may request.
+
+    An ``IntEnum`` rather than ``Literal[25, 50, 100]`` on purpose: FastAPI binds
+    query parameters as *strings*, and Pydantic coerces a numeric string into an
+    int enum but refuses to coerce it into an integer ``Literal`` - so the latter
+    would reject every legitimate ``?page_size=25`` request with a 422. Enumerating
+    here still emits the closed ``[25, 50, 100]`` set in the OpenAPI schema."""
+
+    S_25 = 25
+    S_50 = 50
+    S_100 = 100
 
 
 class ChainShare(BaseModel):
@@ -260,3 +275,85 @@ class ChatAnswer(BaseModel):
     # "none" (no supporting context found - a refusal, not a fabricated answer).
     generated_by: str
     model: str | None = None
+
+
+# --- Protocol discovery catalog (separate from monitored overviews) ----------
+
+
+class ProtocolCatalogItem(BaseModel):
+    """One row of the discovery catalog, as the Explorer lists it.
+
+    Deliberately *not* ``ProtocolOverview``: the catalog spans thousands of
+    protocols of which only a handful are monitored, so it carries the identity
+    and market-metadata DefiLlama supplies for everyone, plus the risk fields
+    only a scored protocol has. Missing metrics stay ``None`` (a gap), never 0.
+    """
+
+    slug: str
+    name: str
+    category: str | None = None
+    symbol: str | None = None
+    chains: list[str] = Field(default_factory=list)
+    tvl: float | None = None
+    change_1d: float | None = None
+    change_7d: float | None = None
+    change_1m: float | None = None
+    audits: str | None = None
+    url: str | None = None
+    # Present only when a monitoring pass has scored this slug; the rest of the
+    # catalog reports an explicit gap rather than a fabricated low-risk pass.
+    risk_score: float | None = None
+    risk_band: str = "unknown"
+    monitored: bool = False
+    listing_timestamp: int | None = None
+    # ISO date of the last metadata sync for this row (the "updated" sort key).
+    updated_at: str | None = None
+
+
+class ProtocolCatalogPage(BaseModel):
+    """A single page of the catalog plus the metadata the Explorer needs.
+
+    ``total`` is the count of rows matching the active filters (before paging),
+    ``pages`` the derived page count - both computed server-side so the UI never
+    loads the whole catalog to paginate locally."""
+
+    items: list[ProtocolCatalogItem] = Field(default_factory=list)
+    total: int
+    page: int
+    page_size: int
+    pages: int
+    sort: str
+    order: str
+    q: str | None = None
+    chain: str | None = None
+    category: str | None = None
+    band: str | None = None
+
+
+class CatalogFacets(BaseModel):
+    """Distinct filter values for the Explorer's chain / category selectors.
+
+    Sourced from the stored catalog rather than a hardcoded list, so the options
+    track what was actually discovered."""
+
+    categories: list[str] = Field(default_factory=list)
+    chains: list[str] = Field(default_factory=list)
+
+
+class CatalogSyncStats(BaseModel):
+    """Outcome of one catalog synchronization, returned by the sync endpoint.
+
+    Every counter is reported rather than hidden behind a bare "ok": an operator
+    needs to see how many rows were inserted vs updated vs left alone, and which
+    malformed entries were skipped, to trust that a sync did not lose data."""
+
+    fetched: int
+    inserted: int
+    updated: int
+    unchanged: int
+    skipped: int
+    duplicates: int
+    total_after: int
+    duration_seconds: float
+    completed_at: str
+    errors: list[str] = Field(default_factory=list)

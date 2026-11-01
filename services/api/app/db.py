@@ -4,6 +4,14 @@ Default database is SQLite (zero setup, matches the MVP constraint);
 DATABASE_URL accepts PostgreSQL without code changes (docker-compose
 provides one). Tables, by family:
 
+- protocol_catalog: the discovery catalog - one row per DefiLlama slug, the
+  stable unique identifier. Held apart from protocol_snapshots because it is a
+  different grain (identity/metadata, not a daily observation) and a different
+  cadence (metadata sync, not the analytics pass). Most catalog protocols are
+  discovered but never monitored, so the analysis columns stay NULL until a
+  scoring pass fills them - a gap, never a zero.
+- protocol_catalog_chains: normalized (slug, chain) membership so "protocols on
+  chain X" is an indexed exact match rather than a substring scan of a JSON blob.
 - protocol_snapshots: daily TVL/risk observations per protocol, enabling
   history beyond DefiLlama's endpoint and point-in-time comparisons.
 - onchain_observations: daily on-chain activity per protocol per chain, written
@@ -26,6 +34,7 @@ from sqlalchemy import (
     Column,
     DateTime,
     Float,
+    Index,
     Integer,
     String,
     UniqueConstraint,
@@ -88,11 +97,126 @@ class ProtocolSnapshot(Base):
     risk_score = Column(Float)
     risk_band = Column(String)
     captured_at = Column(DateTime(timezone=True))
+    # --- Full research-payload persistence (DB-first detail, latency sweep) ---
+    # The detail page used to rebuild these fields by crawling DefiLlama on the
+    # request path (~13 s cold). They are now captured at crawl time by the
+    # monitoring/pre-seed pass so GET /api/protocols/{slug} assembles entirely
+    # from this row. Every column is nullable and NULL always means "never
+    # captured" - a gap, never a zero (honesty contract).
+    fees_1d = Column(Float)
+    fees_30d = Column(Float)
+    revenue_1d = Column(Float)
+    volume_1d = Column(Float)
+    fees_tvl = Column(Float)
+    volume_tvl = Column(Float)
+    depeg_worst_bps = Column(Float)
+    depeg_asset = Column(String)
+    # {chain: tvl} at capture time - the research payload's chain breakdown.
+    chain_shares = Column(JSON)
+    # scoring.RiskAssessment.to_dict() in full (indicators + data_gaps), so the
+    # explainable-risk panel renders without a live rescore.
+    risk_json = Column(JSON)
+    # 1 = written by a watchlist monitoring pass (feeds the board). 0 = written
+    # by the catalog pre-seed pass: persisted for detail reads but deliberately
+    # invisible to dashboard aggregates/staleness, so CEX/Bridge rows cannot
+    # distort board totals or keep a stale board looking fresh.
+    monitored = Column(Integer, nullable=False, default=1)
 
     # A protocol should have at most one snapshot per day. This guards against
     # duplicate (slug, date) rows from concurrent monitoring passes, which would
     # otherwise double-count aggregate stats and appear twice in the board.
-    __table_args__ = (UniqueConstraint("slug", "date", name="uq_snapshot_slug_date"),)
+    __table_args__ = (
+        UniqueConstraint("slug", "date", name="uq_snapshot_slug_date"),
+        # Latest-row-per-slug and trailing-series reads on the DB-first detail
+        # path; (slug, date) ordering lets both walk the index directly.
+        Index("ix_snapshot_slug_date", "slug", "date"),
+    )
+
+
+# Postgres-only catalog search accelerators. The Phase 0 perf baseline showed
+# `%term%` catalog search degrades to a sequential scan as the catalog grows
+# (p95 ~130 ms at 100k). A trigram GIN lets PostgreSQL answer the existing
+# ILIKE from an index. Declared ONLY on Postgres: SQLite cannot use a GIN and
+# its scan is already sub-millisecond at current size, so we do not over-index
+# there (plan: "add indexes only where a query pattern justifies them"). Also
+# re-issued idempotently in init_db() so a persisted Postgres volume predating
+# them is accelerated without a full alembic run.
+_catalog_trgm_indexes: tuple = ()
+if _IS_POSTGRES:  # pragma: no cover - exercised only against Postgres
+    _catalog_trgm_indexes = (
+        Index(
+            "ix_protocol_catalog_name_trgm",
+            "name",
+            postgresql_using="gin",
+            postgresql_ops={"name": "gin_trgm_ops"},
+        ),
+        Index(
+            "ix_protocol_catalog_slug_trgm",
+            "slug",
+            postgresql_using="gin",
+            postgresql_ops={"slug": "gin_trgm_ops"},
+        ),
+    )
+
+
+class ProtocolCatalog(Base):
+    """The protocol discovery catalog: one row per DefiLlama slug.
+
+    Discovery is deliberately separated from monitoring. This table is filled by
+    an idempotent metadata sync off the ``/protocols`` directory (thousands of
+    protocols), while ``protocol_snapshots`` only ever holds the small set a
+    monitoring pass actually scores. The provider slug is the primary key, so a
+    re-sync updates in place instead of duplicating, and rows absent from a
+    provider response are left untouched (a delisting must not erase history).
+
+    The analysis columns (``risk_score`` / ``risk_band`` / ``monitored``) are
+    written by the monitoring pass, never by discovery, and stay NULL for the
+    many catalog protocols with no Dune coverage or score - which is exactly the
+    state the Explorer must be able to represent honestly."""
+
+    __tablename__ = "protocol_catalog"
+
+    slug = Column(String, primary_key=True)
+    name = Column(String, nullable=False, index=True)
+    category = Column(String, index=True)
+    symbol = Column(String)
+    tvl = Column(Float, index=True)
+    change_1d = Column(Float)
+    change_7d = Column(Float)
+    change_1m = Column(Float)
+    audits = Column(String)
+    url = Column(String)
+    listing_timestamp = Column(Integer)
+    # Normalized, de-duplicated display list of chains. Filtering by chain uses
+    # the ``protocol_catalog_chains`` join table, not this blob.
+    chains = Column(JSON)
+    # Analysis lives here only so the catalog can sort/show an *available* risk
+    # score; NULL means "never scored", not "scored zero". See honesty contract.
+    risk_score = Column(Float, index=True)
+    risk_band = Column(String)
+    monitored = Column(Integer, nullable=False, default=0)
+    first_seen_at = Column(DateTime(timezone=True))
+    # Metadata sync time of the row - the "updated date" the Explorer sorts on.
+    updated_at = Column(DateTime(timezone=True), index=True)
+    last_synced_at = Column(DateTime(timezone=True))
+
+    # Empty on SQLite; the two Postgres-only trigram GINs otherwise.
+    __table_args__ = _catalog_trgm_indexes
+
+
+class ProtocolCatalogChain(Base):
+    """(slug, chain) membership, one row per chain a catalog protocol spans.
+
+    Composite primary key indexes (slug, chain); a chain-leading index backs the
+    common "filter by chain" lookup. Rebuilt per protocol only when its chain
+    set changes, so a steady-state sync writes nothing here."""
+
+    __tablename__ = "protocol_catalog_chains"
+
+    slug = Column(String, primary_key=True)
+    chain = Column(String, primary_key=True)
+
+    __table_args__ = (Index("ix_catalog_chains_chain", "chain"),)
 
 
 class OnchainObservation(Base):
@@ -210,8 +334,25 @@ class SessionRecord(Base):
 
 
 _settings = get_settings()
-_connect_args = {"check_same_thread": False} if _settings.database_url.startswith("sqlite") else {}
-engine = create_engine(_settings.database_url, connect_args=_connect_args)
+if _IS_POSTGRES:
+    # PostgreSQL deployment: pool_pre_ping re-validates a connection before use
+    # (a container restart would otherwise hand back a dead socket), pool_recycle
+    # bounds idle-connection lifetime under a proxy/LB, and an explicit pool
+    # ceiling keeps concurrent dashboard reads from exhausting Postgres backends.
+    # SQLite (dev/tests) has no such concern and keeps its single-connection
+    # check_same_thread escape hatch untouched.
+    engine = create_engine(
+        _settings.database_url,
+        pool_pre_ping=True,
+        pool_recycle=300,
+        pool_size=5,
+        max_overflow=10,
+    )
+else:
+    engine = create_engine(
+        _settings.database_url,
+        connect_args={"check_same_thread": False},
+    )
 SessionLocal = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
 
 
@@ -225,13 +366,42 @@ def init_db() -> None:
         try:
             with engine.begin() as conn:
                 conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+                # pg_trgm must exist before create_all builds the catalog GINs.
+                conn.execute(text("CREATE EXTENSION IF NOT EXISTS pg_trgm"))
         except Exception as exc:  # noqa: BLE001 - surface, don't block startup
             logger.warning(
-                "Could not enable pgvector extension (%s); chat will use lexical retrieval",
+                "Could not enable Postgres extensions (%s); chat will use lexical "
+                "retrieval and catalog search stays scan-backed",
                 type(exc).__name__,
             )
     Base.metadata.create_all(engine)
     _migrate_missing_columns()
+    if _IS_POSTGRES:  # pragma: no cover - exercised only against Postgres
+        _ensure_catalog_search_indexes()
+
+
+def _ensure_catalog_search_indexes() -> None:  # pragma: no cover - Postgres-only
+    """``create_all`` builds the trigram GINs for a *fresh* Postgres catalog, but
+    a persisted volume created before they existed keeps its table (create_all
+    never ALTERs one). Re-issue them idempotently so an existing deployment is
+    accelerated too, without a manual alembic run. Best-effort: a missing
+    extension or an older Postgres degrades to the ordinary scan, never a crash.
+    """
+    ddl = (
+        "CREATE INDEX IF NOT EXISTS ix_protocol_catalog_name_trgm "
+        "ON protocol_catalog USING gin (name gin_trgm_ops)",
+        "CREATE INDEX IF NOT EXISTS ix_protocol_catalog_slug_trgm "
+        "ON protocol_catalog USING gin (slug gin_trgm_ops)",
+    )
+    try:
+        with engine.begin() as conn:
+            for stmt in ddl:
+                conn.execute(text(stmt))
+    except Exception as exc:  # noqa: BLE001 - accelerator is optional
+        logger.warning(
+            "Could not ensure catalog trigram indexes (%s); search stays scan-backed",
+            type(exc).__name__,
+        )
 
 
 # Map ORM column type class names to SQL types valid on both SQLite and
@@ -270,6 +440,16 @@ def _migrate_missing_columns() -> None:
                 sqltype = _SQL_TYPES.get(col.type.__class__.__name__, "VARCHAR")
                 logger.info("Migrating: adding column %s.%s", table.name, col.name)
                 conn.execute(text(f"ALTER TABLE {table.name} ADD COLUMN {col.name} {sqltype}"))
+                # Portable stand-in for the alembic revision's server_default:
+                # ALTER ADD COLUMN cannot carry NOT NULL DEFAULT across both
+                # dialects, so a pre-seed snapshot row lands as NULL - which the
+                # board's ``monitored == 1`` filter would silently hide. Every
+                # row predating the column was written by a monitoring pass, so
+                # backfill it as monitored.
+                if table.name == "protocol_snapshots" and col.name == "monitored":
+                    conn.execute(
+                        text("UPDATE protocol_snapshots SET monitored = 1 WHERE monitored IS NULL")
+                    )
 
 
 def get_session() -> Iterator[Session]:

@@ -14,6 +14,10 @@ dependencies = [
     "sqlalchemy>=2.0",
     "psycopg[binary]>=3.1",
     "pgvector>=0.2.5",
+    # Optional catalog cache (performance roadmap Stage 3). Imported lazily and
+    # ONLY when DEFISCOPE_REDIS_URL is set, so a Redis-less SQLite/CI run never
+    # loads it; it is a runtime dep purely for the Redis-enabled deployment.
+    "redis>=5.0",
     "apscheduler>=3.10",
     "python-dateutil>=2.9",
     "alembic>=1.20.1",

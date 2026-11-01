@@ -17,6 +17,11 @@ os.environ.setdefault("DEFISCOPE_AUTH_MODE", "off")
 # data gap, and no test may reach out to api.dune.com because a developer happens
 # to have a key in services/api/.env.
 os.environ.setdefault("DEFISCOPE_DUNE_API_KEY", "")
+# No Redis URL by default: the catalog cache is a no-op in tests, so every read
+# hits the test database. The cache logic is exercised separately with an
+# injected fake client. Mirrors the Dune guard - a developer's .env can never
+# make CI reach a live Redis.
+os.environ.setdefault("DEFISCOPE_REDIS_URL", "")
 
 import httpx  # noqa: E402
 import pytest  # noqa: E402

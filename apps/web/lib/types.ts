@@ -38,6 +38,12 @@ export type ResearchBrief = DeepRequired<Schemas["ResearchBrief"]>;
 export type Mover = DeepRequired<Schemas["Mover"]>;
 export type DashboardStats = DeepRequired<Schemas["DashboardStats"]>;
 export type DashboardResponse = DeepRequired<Schemas["DashboardResponse"]>;
+// Protocol discovery catalog (the paginated 5,000+ Explorer surface). `items`
+// carry nullable metrics that stay null for unmonitored protocols; DeepRequired
+// only removes the "missing" state, never the null gap.
+export type ProtocolCatalogItem = DeepRequired<Schemas["ProtocolCatalogItem"]>;
+export type ProtocolCatalogPage = DeepRequired<Schemas["ProtocolCatalogPage"]>;
+export type CatalogFacets = DeepRequired<Schemas["CatalogFacets"]>;
 export type ChatCitation = DeepRequired<Schemas["ChatCitation"]>;
 export type ChatAnswer = DeepRequired<Schemas["ChatAnswer"]>;
 

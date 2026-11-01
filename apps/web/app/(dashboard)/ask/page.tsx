@@ -9,15 +9,16 @@ export const metadata = {
   description: "Grounded Q&A over DeFiScope's methodology and protocol evidence.",
 };
 
-// Server component: reads the tracked protocol list via the server-only API URL
-// (never exposed to the browser) and hands a lightweight name/slug list to the
-// client chat panel. A failure here just means no protocol scope dropdown - the
-// chat still works for general methodology questions.
+// Server component: reads the tracked (monitored) protocol list via the
+// server-only API URL (never exposed to the browser) and hands a lightweight
+// name/slug list to the client chat panel. The scope list is the analyzed set,
+// not the full discovery catalog. A failure here just means no protocol scope
+// dropdown - the chat still works for general methodology questions.
 async function AskContent() {
   let protocols: { slug: string; name: string }[] = [];
   try {
-    const rows = await api.protocols();
-    protocols = rows
+    const board = await api.dashboard();
+    protocols = board.protocols
       .map((p) => ({ slug: p.slug, name: p.name }))
       .sort((a, b) => a.name.localeCompare(b.name));
   } catch {

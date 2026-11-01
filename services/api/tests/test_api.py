@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 import httpx
 import pytest
 import respx
-from app.db import Base, ProtocolSnapshot, SessionLocal, engine
+from app.db import Base, ProtocolCatalog, ProtocolSnapshot, SessionLocal, engine
 from app.main import app
 from app.services import alerts as alert_engine
 from app.services.protocols import ProtocolResearchService
@@ -73,18 +73,92 @@ async def api_client(mock_llama):
     await app.state.http.aclose()
 
 
+async def seed_protocol(slug: str) -> None:
+    """Populate the DB for the DB-first detail/brief routes.
+
+    The read path no longer crawls, so a rich payload has to be captured first.
+    We run the *actual* crawl once (against the mocked DefiLlama) and persist it
+    exactly as the monitoring pass would - which doubles as coverage that what a
+    crawl writes is what a read renders."""
+    Base.metadata.create_all(engine)
+    svc = ProtocolResearchService()
+    sess = SessionLocal()
+    try:
+        pack = await svc.get_pack(slug, app.state.http, session=sess)
+        alert_engine.backfill_history(sess, pack)
+        alert_engine.persist_snapshots(sess, [pack], monitored=1)
+    finally:
+        sess.close()
+
+
+async def test_preseed_re_persist_never_demotes_a_watchlist_row(api_client):
+    # Regression: a watchlist protocol's current-day row is monitored=1. The
+    # background pre-seed can re-persist the SAME (slug, date) with monitored=0
+    # (they overlap in the catalog), and must refresh the analysis WITHOUT
+    # dropping the protocol off the board - otherwise latest_rows falls back to
+    # a bare backfill history row with no risk/change ("unknown" band, no movers).
+    Base.metadata.create_all(engine)
+    sess = SessionLocal()
+    try:
+        sess.query(ProtocolSnapshot).filter_by(slug="test-protocol").delete()
+        sess.commit()
+        svc = ProtocolResearchService()
+        pack = await svc.get_pack("test-protocol", app.state.http, session=sess)
+        alert_engine.backfill_history(sess, pack)
+        alert_engine.persist_snapshots(sess, [pack], monitored=1)
+        date = pack.latest_date
+
+        alert_engine.persist_snapshots(sess, [pack], monitored=0)
+
+        row = (
+            sess.query(ProtocolSnapshot)
+            .filter_by(slug="test-protocol", date=date)
+            .first()
+        )
+        assert row is not None
+        assert row.monitored == 1  # never demoted by the detail pass
+    finally:
+        sess.query(ProtocolSnapshot).filter_by(slug="test-protocol").delete()
+        sess.commit()
+        sess.close()
+
+
 class TestProtocolsEndpoints:
-    async def test_list_returns_normalized_overviews(self, api_client):
+    async def test_list_is_a_paginated_catalog(self, api_client):
+        # ``GET /api/protocols`` is now the DB-backed discovery catalog, not a
+        # live watchlist crawl. Start from an empty catalog so the cold-start
+        # metadata sync (served by the mocked /protocols) populates exactly one
+        # row and the assertions below are deterministic.
+        Base.metadata.create_all(engine)
+        sess = SessionLocal()
+        try:
+            sess.query(ProtocolCatalog).delete()
+            sess.commit()
+        finally:
+            sess.close()
+
         resp = await api_client.get("/api/protocols")
         assert resp.status_code == 200
-        row = resp.json()[0]
+        page = resp.json()
+        assert page["total"] == 1
+        assert page["page"] == 1
+        assert page["page_size"] == 25
+        assert page["pages"] == 1
+        assert page["sort"] == "tvl"
+        assert page["order"] == "desc"
+        row = page["items"][0]
         assert row["slug"] == "test-protocol"
+        assert row["name"] == "Test Protocol"
         assert row["category"] == "Lending"
-        assert row["risk_band"] in ("low", "moderate", "elevated", "high")
-        assert row["risk_score"] is not None
-        assert row["as_of"]
+        assert row["tvl"] == 1_000_000
+        # Discovery never fabricates a score: an unsynced-analysis protocol
+        # reports an explicit gap (null score, "unknown" band), never a zero.
+        assert row["risk_score"] is None
+        assert row["risk_band"] == "unknown"
+        assert row["monitored"] is False
 
     async def test_detail_includes_series_chains_and_explainable_risk(self, api_client):
+        await seed_protocol("test-protocol")
         resp = await api_client.get("/api/protocols/test-protocol")
         assert resp.status_code == 200
         data = resp.json()
@@ -113,6 +187,7 @@ class TestProtocolsEndpoints:
         assert resp.status_code == 404
 
     async def test_sources_and_as_of_present(self, api_client):
+        await seed_protocol("test-protocol")
         resp = await api_client.get("/api/protocols/test-protocol")
         data = resp.json()
         assert any("defillama" in s for s in data["sources"])
@@ -170,6 +245,7 @@ class TestRiskHistoryEndpoint:
 
 class TestBriefsEndpoint:
     async def test_brief_falls_back_to_template_without_llm_key(self, api_client):
+        await seed_protocol("test-protocol")
         resp = await api_client.get("/api/briefs/test-protocol")
         assert resp.status_code == 200
         brief = resp.json()
@@ -181,6 +257,7 @@ class TestBriefsEndpoint:
 
 class TestBriefExportEndpoint:
     async def test_csv_streams_attachment(self, api_client):
+        await seed_protocol("test-protocol")
         resp = await api_client.get("/api/briefs/test-protocol/export?format=csv")
         assert resp.status_code == 200
         assert resp.headers["content-type"].startswith("text/csv")
@@ -190,6 +267,7 @@ class TestBriefExportEndpoint:
         assert "executive_summary" in resp.text
 
     async def test_pdf_returns_pdf_bytes(self, api_client):
+        await seed_protocol("test-protocol")
         resp = await api_client.get("/api/briefs/test-protocol/export?format=pdf")
         assert resp.status_code == 200
         assert resp.headers["content-type"].startswith("application/pdf")
@@ -197,6 +275,7 @@ class TestBriefExportEndpoint:
         assert len(resp.content) > 500
 
     async def test_markdown_is_the_default_format(self, api_client):
+        await seed_protocol("test-protocol")
         resp = await api_client.get("/api/briefs/test-protocol/export")
         assert resp.status_code == 200
         assert resp.headers["content-type"].startswith("text/markdown")

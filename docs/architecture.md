@@ -10,6 +10,44 @@ scores protocols, fires threshold alerts, renders the board from its own
 snapshots, and answers chat questions *extractively* from quoted evidence — the
 LLM is an enhancement, never a dependency.
 
+## System overview
+
+```
+  BROWSER
+     |
+     |  HTTP + WebSocket (public URLs only)
+     v
++------------------------------------------------------------+
+|  apps/web · Next.js 16 (RSC :3000 dev / :4000 compose)     |
+|  board · /protocols/[slug] · /alerts · /ask · /compare     |
+|  same-origin proxy: api/chat · api/run-check ·             |
+|                     api/brief-export/[slug]                |
++---------------------------+--------------------------------+
+                            |  server-side fetch (NEXT_PUBLIC_API_URL)
+                            v
++------------------------------------------------------------+
+|  services/api · FastAPI + pandas (:8000 dev / :3646 compose)|
+|                                                            |
+|  clients/defillama.py  ->  analysis/  ->  services/        |
+|  (fetch+normalize)         (pure math)    (orchestration)  |
+|                                  |                |        |
+|                                  v                v        |
+|                              routers/*        rag/ (chat)  |
++---------+-----------------+-----------------+--------------+
+          |                 |                 |
+          v                 v                 v
++------------------+  +--------------+  +------------------+
+| DefiLlama APIs   |  | db.py        |  | notifiers/       |
+| llama.fi (free,  |  | SQLite |     |  | console·webhook· |
+| no key)          |  | Postgres +   |  | slack·discord·   |
+| 4 endpoint hosts |  | pgvector     |  | telegram·email   |
++------------------+  +--------------+  +------------------+
+
+  optional, opt-in -----> OpenAI-compatible LLM / Ollama (/v1)
+                         (absence degrades: template briefs, BM25 +
+                          extractive chat — never a hard dependency)
+```
+
 ## Repository layout
 
 ```
@@ -87,8 +125,9 @@ DeFiScope-AI/
   services/        services/        services/        services/       rag/ingest
   protocols        dashboard        briefs           alerts          (docs + evidence
   (TTL cache,      (DB-first        (LLM |            (rules →        chunks → BM25/
-   discovery)      reads +          template)          persist +       cosine index)
+   discovery)      reads +           template)          persist +       cosine index)
         │           hydrate)                            notify)            │
+        │              │                │                 │               │
         ▼              ▼                ▼                 ▼               ▼
      routers/protocols · dashboard · briefs · alerts · chat  ── OpenAPI ──▶ apps/web
                                         │                                   (RSC + codegen types)
@@ -104,6 +143,105 @@ awaited in the lifespan, so a slow crawl can't delay the port bind or fail
 readiness). The RAG index is hydrated synchronously from any persisted chunks
 (offline-capable from the first request) and refreshed in the background after
 warm-up, because the evidence chunks are derived from the snapshots/alerts.
+
+### Monitoring pass lifecycle
+
+```
+ service start ──> background pass (NOT awaited in lifespan —
+                   a slow crawl can't delay the port bind)
+        |
+ every 30 min (APScheduler, in-process) <──+
+        |                                  |
+        v                                  |
+ discover watchlist (curated slugs + top-N by TVL)
+        |
+        v
+ fetch packs concurrently (bounded, LRU TTL 5-min,
+ retry/backoff honouring Retry-After)
+        |            ┌─ one protocol fails ──> log + skip, board survives
+        v            v
+ metrics -> scoring -> rules
+        |
+        v
+ persist daily snapshots (unique slug+date)
+        |
+        v
+ upsert alerts — id = sha256(slug:rule:day)
+        |               ┌─ existing, within notified_at cooldown ──> skip
+        v               v
+ new alert? ──no──> done
+     |
+    yes
+     v
+ fan out to configured channels (each activates only when
+ its env secret is set; a dead channel logs by exception
+ *type* only and never aborts the pass)
+```
+
+### Brief & export flow
+
+```
+ RiskAssessment (indicators + composite + data_gaps)
+        |
+        |  services/briefs.py — the LLM composes prose ONLY from this pack,
+        |  it never computes a number ("never invent numbers" + JSON schema)
+        v
+ +---------------------------------------------------------------+
+ | evidence pack: numbers, evidence, limitations, data_gaps,     |
+ | alerts                                                        |
+ |       ├── key set ──> OpenAI JSON   (generated_by="llm")      |
+ |       └── no key  ──> deterministic (generated_by="template") |
+ |                               same sections, fully offline    |
+ |  confidence auto-downgrades when data gaps exist              |
+ +---------------------------------------------------------------+
+        |
+        v
+ GET /api/briefs/{slug}  ──>  /export?format=md|csv|pdf
+                              (CSV neutralizes formula injection;
+                               PDF via reportlab; Content-Disposition
+                               attachment served through the Next
+                               api/brief-export/[slug] proxy)
+```
+
+### Chat / RAG request flow
+
+```
+ question ──> retrieve over the indexed corpus
+              (docs chunks + per-protocol evidence packs)
+                    |
+        ┌───────────┴────────────┐
+   key set?                    no key
+        │                        │
+        v                        v
+   cosine (pgvector       Okapi-BM25 lexical
+   or in-process)         (k1=1.5, b=0.75)
+        │                        │
+        └───────────┬────────────┘
+                    v
+        method-aware relevance gate   (scores are on incomparable
+        |                            scales, so the bar differs)
+        ├── cosine path:  score >= rag_min_score (0.5)
+        └── lexical path: shares >= rag_min_query_term_overlap (2)
+                          distinct informative terms (stopwords removed)
+                    |
+        nothing clears the bar ──> refuse: generated_by="none",
+                                   grounded=false, names the missing
+                                   evidence instead of quoting noise
+                    |
+                    v
+        supporting chunks -> numbered [n] context
+            |                            |
+   LLM call ok               LLM down / timeout / no key
+            |                            |
+            v                            v
+   generated_by="llm"          generated_by="extractive"
+   prose, every claim           verbatim quoted passages —
+   cited [n]                    no synthesis, nothing invented
+
+ transport: WS /ws/chat (token / citations / done frames) — chosen over
+ SSE because Cloudflare quick tunnels pass WS but not SSE; the web app
+ falls back to POST /api/chat (same-origin proxy) when WS is unavailable.
+```
 
 ## Persistence
 
@@ -124,6 +262,50 @@ through **Alembic** (`services/api/alembic`); `init_db()` also adds any missing
 column idempotently as a safety net for a volume that predates a deploy, and
 best-effort `CREATE EXTENSION vector` so a non-pgvector install degrades to
 lexical chat instead of crashing.
+
+## Performance & indexing
+
+Indexing is **query-driven and measured, not assumed**. The catalog is already
+well indexed by the model definitions: PK `slug`, plus `name` / `category` /
+`tvl` / `risk_score` / `updated_at`; the `protocol_catalog_chains` join table
+carries a chain-leading index for "filter by chain"; and the `(slug, date)` /
+`(slug, date, chain)` unique constraints on snapshots and observations double as
+history/sort indexes and duplicate guards. The board avoids N+1 by batch-loading
+sparklines in one `IN` query and joining a `max(date)` subquery.
+
+A baseline harness — [`scripts/perf_bench.py`](../services/api/scripts/perf_bench.py)
+— seeds a synthetic catalog at 5k / 50k / 100k protocols, times each real read
+path through `app.services.catalog`, and captures `EXPLAIN QUERY PLAN` (SQLite)
+and `EXPLAIN (ANALYZE, BUFFERS)` (Postgres). Results live in
+[`perf-baseline.md`](./perf-baseline.md). Findings at a glance (p95, ms):
+
+| path | 5k | 50k | 100k | conclusion |
+|---|---|---|---|---|
+| default tvl page | ~2 | ~12 | ~37 | temp-B-tree sort (the portable nulls-last key defeats the `tvl` index) — only matters at 100k |
+| `%term%` search | ~7 | ~64 | ~130 | sequential scan; the one path that grows past budget |
+| deep `OFFSET` page | ~14 | ~481 | ~929 | O(offset) — **not indexable**; needs keyset pagination or a page cap |
+| count (unfiltered) | ~0.3 | ~3 | ~9 | rides the PK covering index — cheaper than assumed |
+
+At the production size (~8.9k) **every** path is under 15 ms, so the ≤100 ms
+target is met without new indexes. Two changes are justified by the data and
+implemented; the rest are explicit **scale triggers**, not built to avoid
+over-indexing:
+
+- **Postgres connection pooling** (`db.py`): `pool_pre_ping`, `pool_recycle`,
+  bounded `pool_size` / `max_overflow` on the Postgres branch. Size-independent
+  reliability win (a container restart no longer hands back dead sockets).
+- **Postgres-only trigram GIN** for search (`db.py`): `pg_trgm` indexes on
+  `name` / `slug`, declared only under `_IS_POSTGRES` (SQLite keeps its fast
+  scan — no over-indexing), enabled by `CREATE EXTENSION pg_trgm` and
+  re-issued `CREATE INDEX IF NOT EXISTS` idempotently in `init_db()` so a
+  persisted volume is accelerated without a full Alembic run. No query-code
+  change: SQLAlchemy's `ilike()` already emits `ILIKE`, which the index serves.
+
+**Deferred, with triggers:** keyset pagination (when the catalog approaches 50k
+and deep pages become reachable at scale); `NULLS LAST` ordering + a matching
+`(tvl DESC NULLS LAST, slug)` index (needs a coupled `_ordering` rewrite, only
+worth it at ~100k); count/facets caching (measured low-value at current size);
+pgvector ANN on `chat_chunks` (when chunk count makes the exact scan slow).
 
 ## On-chain analytics (second provider)
 
