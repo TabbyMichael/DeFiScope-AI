@@ -100,6 +100,98 @@
         "title": "BriefSection",
         "type": "object"
       },
+      "CatalogFacets": {
+        "description": "Distinct filter values for the Explorer's chain / category selectors.\n\nSourced from the stored catalog rather than a hardcoded list, so the options\ntrack what was actually discovered.",
+        "properties": {
+          "categories": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Categories",
+            "type": "array"
+          },
+          "chains": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Chains",
+            "type": "array"
+          }
+        },
+        "title": "CatalogFacets",
+        "type": "object"
+      },
+      "CatalogPageSize": {
+        "description": "Closed set of page sizes the catalog Explorer may request.\n\nAn ``IntEnum`` rather than ``Literal[25, 50, 100]`` on purpose: FastAPI binds\nquery parameters as *strings*, and Pydantic coerces a numeric string into an\nint enum but refuses to coerce it into an integer ``Literal`` - so the latter\nwould reject every legitimate ``?page_size=25`` request with a 422. Enumerating\nhere still emits the closed ``[25, 50, 100]`` set in the OpenAPI schema.",
+        "enum": [
+          25,
+          50,
+          100
+        ],
+        "title": "CatalogPageSize",
+        "type": "integer"
+      },
+      "CatalogSyncStats": {
+        "description": "Outcome of one catalog synchronization, returned by the sync endpoint.\n\nEvery counter is reported rather than hidden behind a bare \"ok\": an operator\nneeds to see how many rows were inserted vs updated vs left alone, and which\nmalformed entries were skipped, to trust that a sync did not lose data.",
+        "properties": {
+          "completed_at": {
+            "title": "Completed At",
+            "type": "string"
+          },
+          "duplicates": {
+            "title": "Duplicates",
+            "type": "integer"
+          },
+          "duration_seconds": {
+            "title": "Duration Seconds",
+            "type": "number"
+          },
+          "errors": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Errors",
+            "type": "array"
+          },
+          "fetched": {
+            "title": "Fetched",
+            "type": "integer"
+          },
+          "inserted": {
+            "title": "Inserted",
+            "type": "integer"
+          },
+          "skipped": {
+            "title": "Skipped",
+            "type": "integer"
+          },
+          "total_after": {
+            "title": "Total After",
+            "type": "integer"
+          },
+          "unchanged": {
+            "title": "Unchanged",
+            "type": "integer"
+          },
+          "updated": {
+            "title": "Updated",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "fetched",
+          "inserted",
+          "updated",
+          "unchanged",
+          "skipped",
+          "duplicates",
+          "total_after",
+          "duration_seconds",
+          "completed_at"
+        ],
+        "title": "CatalogSyncStats",
+        "type": "object"
+      },
       "ChainShare": {
         "properties": {
           "chain": {
@@ -519,6 +611,253 @@
           "status"
         ],
         "title": "OnchainActivityOut",
+        "type": "object"
+      },
+      "ProtocolCatalogItem": {
+        "description": "One row of the discovery catalog, as the Explorer lists it.\n\nDeliberately *not* ``ProtocolOverview``: the catalog spans thousands of\nprotocols of which only a handful are monitored, so it carries the identity\nand market-metadata DefiLlama supplies for everyone, plus the risk fields\nonly a scored protocol has. Missing metrics stay ``None`` (a gap), never 0.",
+        "properties": {
+          "audits": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Audits"
+          },
+          "category": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Category"
+          },
+          "chains": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Chains",
+            "type": "array"
+          },
+          "change_1d": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Change 1D"
+          },
+          "change_1m": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Change 1M"
+          },
+          "change_7d": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Change 7D"
+          },
+          "listing_timestamp": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Listing Timestamp"
+          },
+          "monitored": {
+            "default": false,
+            "title": "Monitored",
+            "type": "boolean"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "risk_band": {
+            "default": "unknown",
+            "title": "Risk Band",
+            "type": "string"
+          },
+          "risk_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Risk Score"
+          },
+          "slug": {
+            "title": "Slug",
+            "type": "string"
+          },
+          "symbol": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Symbol"
+          },
+          "tvl": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tvl"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          },
+          "url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Url"
+          }
+        },
+        "required": [
+          "slug",
+          "name"
+        ],
+        "title": "ProtocolCatalogItem",
+        "type": "object"
+      },
+      "ProtocolCatalogPage": {
+        "description": "A single page of the catalog plus the metadata the Explorer needs.\n\n``total`` is the count of rows matching the active filters (before paging),\n``pages`` the derived page count - both computed server-side so the UI never\nloads the whole catalog to paginate locally.",
+        "properties": {
+          "band": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Band"
+          },
+          "category": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Category"
+          },
+          "chain": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Chain"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ProtocolCatalogItem"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "order": {
+            "title": "Order",
+            "type": "string"
+          },
+          "page": {
+            "title": "Page",
+            "type": "integer"
+          },
+          "page_size": {
+            "title": "Page Size",
+            "type": "integer"
+          },
+          "pages": {
+            "title": "Pages",
+            "type": "integer"
+          },
+          "q": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Q"
+          },
+          "sort": {
+            "title": "Sort",
+            "type": "string"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "total",
+          "page",
+          "page_size",
+          "pages",
+          "sort",
+          "order"
+        ],
+        "title": "ProtocolCatalogPage",
         "type": "object"
       },
       "ProtocolOverview": {
@@ -1554,6 +1893,28 @@
         ]
       }
     },
+    "/api/catalog/sync": {
+      "post": {
+        "description": "Idempotently upsert the full DefiLlama directory into the catalog.\n\nReturns per-outcome counters (inserted / updated / unchanged / skipped /\nduplicates) so an operator can see the sync did not lose or duplicate rows.\nRe-running it is safe: existing rows are updated in place and rows the\nprovider no longer lists are left untouched.",
+        "operationId": "sync_catalog_api_catalog_sync_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CatalogSyncStats"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Sync Catalog",
+        "tags": [
+          "catalog"
+        ]
+      }
+    },
     "/api/chat": {
       "post": {
         "operationId": "chat_api_chat_post",
@@ -1657,24 +2018,186 @@
     },
     "/api/protocols": {
       "get": {
+        "description": "Paginated protocol discovery catalog, served entirely from the DB.\n\nPagination, search, filtering and sorting all happen server-side; only one\npage of rows is ever returned. ``sort`` is bound to an allowlisted column\n(see ``catalog.SORT_COLUMNS``) - the caller's string never reaches SQL as\ntext - and ordering is made deterministic with a slug tiebreak.",
         "operationId": "list_protocols_api_protocols_get",
+        "parameters": [
+          {
+            "description": "1-based page number",
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "description": "1-based page number",
+              "maximum": 100000,
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "rows per page",
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/CatalogPageSize",
+              "default": 25,
+              "description": "rows per page"
+            }
+          },
+          {
+            "description": "search name or slug",
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 120,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "search name or slug",
+              "title": "Q"
+            }
+          },
+          {
+            "description": "filter by chain",
+            "in": "query",
+            "name": "chain",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 80,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "filter by chain",
+              "title": "Chain"
+            }
+          },
+          {
+            "description": "filter by category",
+            "in": "query",
+            "name": "category",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 80,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "filter by category",
+              "title": "Category"
+            }
+          },
+          {
+            "description": "filter by risk band",
+            "in": "query",
+            "name": "band",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 40,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "filter by risk band",
+              "title": "Band"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort",
+            "required": false,
+            "schema": {
+              "default": "tvl",
+              "enum": [
+                "tvl",
+                "name",
+                "updated",
+                "risk"
+              ],
+              "title": "Sort",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "order",
+            "required": false,
+            "schema": {
+              "default": "desc",
+              "enum": [
+                "asc",
+                "desc"
+              ],
+              "title": "Order",
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "items": {
-                    "$ref": "#/components/schemas/ProtocolOverview"
-                  },
-                  "title": "Response List Protocols Api Protocols Get",
-                  "type": "array"
+                  "$ref": "#/components/schemas/ProtocolCatalogPage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Protocols",
+        "tags": [
+          "protocols"
+        ]
+      }
+    },
+    "/api/protocols/facets": {
+      "get": {
+        "description": "Distinct chain and category values present in the catalog, for the\nExplorer's filter selectors. Declared before ``/{slug}`` so \"facets\" is not\nswallowed as a protocol slug.",
+        "operationId": "protocol_facets_api_protocols_facets_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CatalogFacets"
                 }
               }
             },
             "description": "Successful Response"
           }
         },
-        "summary": "List Protocols",
+        "summary": "Protocol Facets",
         "tags": [
           "protocols"
         ]

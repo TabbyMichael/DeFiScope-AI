@@ -16,8 +16,8 @@ import logging
 import httpx
 
 from app.config import get_settings
-from app.schemas import BriefSection, ResearchBrief
-from app.services.protocols import ResearchPack
+from app.schemas import BriefSection, ResearchBrief, RiskAssessmentOut
+from app.services.detail import DetailPack
 
 logger = logging.getLogger(__name__)
 
@@ -64,11 +64,20 @@ def _fmt(value, pct=False, dollars=False) -> str:
     return f"{value}"
 
 
-def build_evidence_context(pack: ResearchPack) -> str:
-    ov = pack.risk  # scores embedded; recompute light facts from metrics consumers already stored
-    from app.services.protocols import pack_to_overview
+def _risk_of(dp: DetailPack) -> RiskAssessmentOut | None:
+    """Re-materialize the persisted ``risk_json`` as a typed assessment.
 
-    o = pack_to_overview(pack)
+    The DB stores the exact ``RiskAssessment.to_dict()`` a crawl produced, so
+    revalidating it (rather than rescoring) keeps the brief's indicator evidence
+    identical to what the detail page shows - and costs no computation."""
+    if not dp.risk:
+        return None
+    return RiskAssessmentOut.model_validate(dp.risk)
+
+
+def build_evidence_context(dp: DetailPack) -> str:
+    o = dp.overview
+    risk = _risk_of(dp)
     indicators = [
         {
             "label": i.label,
@@ -77,13 +86,13 @@ def build_evidence_context(pack: ResearchPack) -> str:
             "evidence": i.evidence,
             "limitation": i.limitation,
         }
-        for i in (ov.indicators if ov else [])
+        for i in (risk.indicators if risk else [])
     ]
     return USER_PROMPT_TEMPLATE.format(
-        as_of=pack.latest_date or "unknown",
-        name=pack.detail.name,
+        as_of=o.as_of or "unknown",
+        name=dp.name,
         category=o.category or "unknown",
-        slug=pack.slug,
+        slug=dp.slug,
         tvl=o.tvl or 0.0,
         chg7=_fmt(o.change_7d, pct=True),
         chg30=_fmt(o.change_30d, pct=True),
@@ -94,11 +103,11 @@ def build_evidence_context(pack: ResearchPack) -> str:
         risk_score=_fmt(o.risk_score),
         band=o.risk_band,
         indicators_json=json.dumps(indicators, indent=2),
-        gaps=", ".join(ov.data_gaps if ov else []) or "none recorded",
+        gaps=", ".join(risk.data_gaps if risk else []) or "none recorded",
     )
 
 
-async def generate_llm_brief(pack: ResearchPack, http: httpx.AsyncClient) -> BriefSection | None:
+async def generate_llm_brief(dp: DetailPack, http: httpx.AsyncClient) -> BriefSection | None:
     settings = get_settings()
     if not settings.openai_api_key:
         return None
@@ -106,7 +115,7 @@ async def generate_llm_brief(pack: ResearchPack, http: httpx.AsyncClient) -> Bri
         "model": settings.openai_model,
         "messages": [
             {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": build_evidence_context(pack)},
+            {"role": "user", "content": build_evidence_context(dp)},
         ],
         "temperature": 0.2,
         "response_format": {"type": "json_object"},
@@ -134,13 +143,11 @@ async def generate_llm_brief(pack: ResearchPack, http: httpx.AsyncClient) -> Bri
         return None
 
 
-def generate_template_brief(pack: ResearchPack) -> BriefSection:
+def generate_template_brief(dp: DetailPack) -> BriefSection:
     """Deterministic, evidence-backed brief used when no LLM is configured."""
-    from app.services.protocols import pack_to_overview
-
-    o = pack_to_overview(pack)
-    risk = pack.risk
-    name = pack.detail.name
+    o = dp.overview
+    risk = _risk_of(dp)
+    name = dp.name
 
     drivers = []
     if o.change_7d is not None and o.change_30d is not None:
@@ -159,11 +166,7 @@ def generate_template_brief(pack: ResearchPack) -> BriefSection:
                 f"No net TVL expansion over 30d ({o.change_30d:+.1f}%); recent flows are the main "
                 "growth channel to investigate."
             )
-    if (
-        o.top_chain_share is not None
-        and o.top_chain_share < 0.7
-        and len(pack.detail.current_chain_tvls) > 3
-    ):
+    if o.top_chain_share is not None and o.top_chain_share < 0.7 and len(dp.chains) > 3:
         drivers.append(
             f"Deployment spans multiple chains with no single chain above "
             f"{o.top_chain_share * 100:.0f}% of TVL, widening the addressable user base."
@@ -284,25 +287,24 @@ Sources: {", ".join(sources)}
 """
 
 
-async def build_brief(pack: ResearchPack, http: httpx.AsyncClient) -> ResearchBrief:
-    sections = await generate_llm_brief(pack, http)
+async def build_brief(dp: DetailPack, http: httpx.AsyncClient) -> ResearchBrief:
+    sections = await generate_llm_brief(dp, http)
     generated_by = "llm"
     if sections is None:
-        sections = generate_template_brief(pack)
+        sections = generate_template_brief(dp)
         generated_by = "template"
     sources = [
-        f"https://defillama.com/protocol/{pack.slug}",
+        f"https://defillama.com/protocol/{dp.slug}",
         "https://api.llama.fi",
     ]
-    markdown = sections_to_markdown(
-        pack.detail.name, pack.slug, sections, pack.latest_date or "n/a", sources, generated_by
-    )
+    as_of = dp.overview.as_of or "n/a"
+    markdown = sections_to_markdown(dp.name, dp.slug, sections, as_of, sources, generated_by)
     return ResearchBrief(
-        slug=pack.slug,
-        protocol=pack.detail.name,
+        slug=dp.slug,
+        protocol=dp.name,
         generated_by=generated_by,
         markdown=markdown,
         sections=sections,
-        as_of=pack.latest_date or "n/a",
+        as_of=as_of,
         sources=sources,
     )

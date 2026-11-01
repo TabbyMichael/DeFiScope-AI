@@ -67,6 +67,23 @@ class Settings(BaseSettings):
     # Persistence
     database_url: str = "sqlite:///./defiscope.db"
 
+    # --- Redis response cache (optional; performance roadmap Stage 3) --------
+    # A strictly-optional accelerator for the catalog list/facet read path - the
+    # only hot surface without an in-process cache. When ``redis_url`` is unset
+    # (the default) every cache helper no-ops and reads use the exact database
+    # path they use today: a speedup when present, never a dependency. Postgres
+    # stays the source of truth; Redis holds only disposable, TTL-bounded pages.
+    redis_url: str | None = None
+    # Master switch; effective only when ``redis_url`` is also set. Disable to
+    # fall back to uncached DB reads without removing the Redis service.
+    catalog_cache_enabled: bool = True
+    # Catalog pages change only via a sync, which bumps a namespace version (so
+    # staleness is bounded by invalidation, not just TTL); keep the TTL short.
+    catalog_cache_ttl_seconds: int = 60
+    # Facets are a cheap distinct scan that changes only when a brand-new chain
+    # or category first appears, so they tolerate a longer TTL.
+    facets_cache_ttl_seconds: int = 300
+
     # --- Authentication & authorization (roadmap #17) ------------------------
     # off      -> every request is served a synthetic, unrestricted principal.
     #             The legacy showcase/CI posture; NEVER safe for a public deploy.
@@ -119,6 +136,44 @@ class Settings(BaseSettings):
     # Bound on the in-process per-protocol research cache (LRU). Keeps memory
     # flat on long-lived processes that discover the whole market.
     research_cache_max_entries: int = 256
+
+    # --- Protocol discovery catalog (separate from monitoring) ---------------
+    # The catalog is the full DefiLlama directory persisted to the DB, powering
+    # the paginated /api/protocols explorer. None of these settings widen the
+    # monitored watchlist or trigger a Dune/analytics crawl - discovery is
+    # metadata only. The allowed page sizes are a fixed API contract, enforced by
+    # the schemas.CatalogPageSize enum (and surfaced in OpenAPI), not config.
+    # Longest search term accepted, so a stray paste cannot build a pathological
+    # LIKE over the whole table.
+    catalog_search_max_length: int = 120
+    # Populate the catalog in the background on startup (best-effort, never a
+    # blocking or analytics call). Disable to require an explicit sync.
+    catalog_sync_on_startup: bool = True
+
+    # --- Catalog pre-seed (DB-first detail warmth) ----------------------------
+    # A bounded background crawl that persists snapshots for catalog protocols
+    # the watchlist does not track, so detail pages are rich on first visit
+    # instead of gap-only until someone views them. Rows are written
+    # ``monitored = 0``: they serve detail reads but never enter dashboard
+    # aggregates or the staleness clock. Disable for deployments that must not
+    # add DefiLlama load (detail pages then fill on view via monitoring passes).
+    preseed_enabled: bool = True
+    # Protocols crawled per batch (through ``crawl_concurrency``), then a pause.
+    preseed_batch_size: int = 150
+    preseed_batch_pause_seconds: float = 90.0
+    # A batch is crawled in chunks this size, pausing between them. One
+    # 150-protocol gather plus its pandas parsing monopolises the single event
+    # loop for seconds at a time, and interactive requests (login!) queue
+    # behind it. Yielding per chunk keeps the API responsive while the seed
+    # drains; the total crawl work is unchanged.
+    preseed_chunk_size: int = 10
+    preseed_chunk_pause_seconds: float = 0.5
+    # Only seed protocols at or above this TVL first; the big names clear the
+    # board-relevant majority long before the tail does.
+    preseed_min_tvl: float = 1_000_000
+    # After the floored queue drains, one final pass at floor 0 sweeps the rest
+    # of the catalog. Heavier on the upstream - the honest knob to turn off.
+    preseed_backfill_rest: bool = True
 
     # LLM (optional - template fallback is used when no key is configured)
     openai_api_key: str | None = None
@@ -230,6 +285,15 @@ class Settings(BaseSettings):
         Every caller checks this instead of the individual fields, so "enabled
         but unconfigured" always resolves to the same, explicit data gap."""
         return bool(self.onchain_data_enabled and self.dune_api_key and self.dune_activity_query_id)
+
+    @property
+    def cache_ready(self) -> bool:
+        """True only when the Redis catalog cache can actually be used.
+
+        Mirrors ``onchain_ready``: every caller checks this, so "enabled but no
+        URL" and "URL but disabled" both resolve to the same honest no-op where
+        catalog reads are served straight from the database."""
+        return bool(self.catalog_cache_enabled and (self.redis_url or "").strip())
 
     @property
     def protocol_slugs(self) -> list[str]:

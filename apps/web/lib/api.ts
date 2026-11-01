@@ -3,9 +3,10 @@ import { cookies } from "next/headers";
 import { SESSION_COOKIE } from "./auth";
 import type {
   Alert,
+  CatalogFacets,
   ChatAnswer,
   DashboardResponse,
-  ProtocolOverview,
+  ProtocolCatalogPage,
   ProtocolResearch,
   ResearchBrief,
   RiskPoint,
@@ -238,10 +239,47 @@ function withheldOf(headers: Headers): number {
   return Number.isFinite(n) && n > 0 ? n : 0;
 }
 
+/** Query for the paginated discovery catalog (`GET /api/protocols`). */
+export interface CatalogQuery {
+  page?: number;
+  pageSize?: 25 | 50 | 100;
+  q?: string;
+  chain?: string;
+  category?: string;
+  band?: string;
+  sort?: "tvl" | "name" | "updated" | "risk";
+  order?: "asc" | "desc";
+}
+
+/**
+ * Build the catalog query string, forwarding only the params that are set.
+ *
+ * Deliberately allowlisted: an unknown key can never reach the backend, and the
+ * server still re-validates every value (page size / sort / order are closed
+ * sets upstream), so this is a convenience boundary, not the security one.
+ */
+export function catalogQuerystring(query: CatalogQuery): string {
+  const params = new URLSearchParams();
+  if (query.page && query.page > 1) params.set("page", String(query.page));
+  if (query.pageSize) params.set("page_size", String(query.pageSize));
+  const q = query.q?.trim();
+  if (q) params.set("q", q);
+  if (query.chain) params.set("chain", query.chain);
+  if (query.category) params.set("category", query.category);
+  if (query.band) params.set("band", query.band);
+  if (query.sort) params.set("sort", query.sort);
+  if (query.order) params.set("order", query.order);
+  const s = params.toString();
+  return s ? `?${s}` : "";
+}
+
 export const api = {
   // Cold hydration may run a live DefiLlama crawl; give it a generous budget.
   dashboard: () => get<DashboardResponse>("/api/dashboard", 120, 60_000),
-  protocols: () => get<ProtocolOverview[]>("/api/protocols", 300, 60_000),
+  // Discovery catalog: one page, filtered/sorted/served entirely server-side.
+  protocols: (query: CatalogQuery = {}) =>
+    get<ProtocolCatalogPage>(`/api/protocols${catalogQuerystring(query)}`, 120, 60_000),
+  protocolFacets: () => get<CatalogFacets>("/api/protocols/facets", 300, 60_000),
   protocol: (slug: string) =>
     get<ProtocolResearch>(`/api/protocols/${encodeURIComponent(slug)}`),
   protocolHistory: (slug: string, days = 30) =>

@@ -20,6 +20,27 @@ All outputs carry an `as_of` date (timestamp of the latest underlying observatio
 and source links. The API refuses to silently present stale data: freshness is a
 first-class field and a monitoring rule.
 
+```
+ THE EVIDENCE CHAIN — every displayed number traces back through this
+
+ sources                normalize             compute              present
+ +----------------+    +--------------+    +----------------+    +--------------+
+ | DefiLlama      |    | daily UTC   |    | metrics.py     |    | composite +  |
+ |  /protocols    |    | forward-    |    |  pure prims    |    | band         |
+ |  /protocol/*   |--->| filled      |--->|  (unit-tested) |--->| indicator    |
+ |  fees.llama.fi |    | frame;      |    | scoring.py     |    |  evidence +  |
+ |  /overview/dexs|    | intraday    |    |  7 weighted    |    |  limitation  |
+ |  coins.llama.fi|    | dupes ->    |    |  indicators -> |    | data_gaps    |
+ | curated maps / |    | max; None   |    |  renormalized  |    | as_of +      |
+ | security notes |    | when no     |    |  composite     |    | source links |
+ +----------------+    | history     |    +----------------+    +--------------+
+                       +--------------+         |
+                            |                   v
+                            v              alerts + briefs
+                       data gap (never     (same evidence pack,
+                       a fabricated 0)     generated_by surfaced)
+```
+
 ## Metric primitives (`app/analysis/metrics.py`)
 
 Raw DefiLlama point series are normalized to a **daily, forward-filled UTC frame**.
@@ -76,6 +97,34 @@ tracked coin, so it does not distort their composites.
 **Composite score** = weighted mean over *available* indicators, renormalized so
 missing data does not count as "safe". If any indicator is not computable it is
 reported under `data_gaps`. Bands: `low` <30 ≤ `moderate` <50 ≤ `elevated` <70 ≤ `high`.
+
+```
+ ONE INDICATOR                      COMPOSITE
+ ============                      ========
+ raw series available? ──no──> score = None
+     |yes                          |
+     v                             v
+ linear map between          weighted mean over AVAILABLE
+ the safe and risky          indicators only — the weights
+ anchors, clamped [0,100]    of the missing ones are
+     |                        RENORMALIZED away, not
+     v                        counted as safe
+ { value, score,                 |
+   weight,                       v
+   evidence,                 band:   low <30 <= moderate <50 <= elevated <70 <= high
+   limitation }                  |
+     |                           v
+     |                    any indicator == None?
+     v                          |
+ rendered with its         yes --+-- no
+ limitation              |         |
+                         v         v
+                    data_gaps   (no gaps section;
+                    (visible,    confidence stays
+                     renormalized) as computed)
+
+ NEVER: unknown -> "safe" | missing feed -> 0 | absent coin -> "on peg"
+```
 
 ### The central analytical caveat
 

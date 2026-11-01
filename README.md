@@ -25,6 +25,25 @@ contract-level on-chain activity. Try it on [Aave](http://localhost:3000/protoco
 | **Side-by-side comparison** | Pick 2–3 protocols into a shareable `/compare` matrix (URL-encoded selection) to tell the "Aave vs Uniswap vs Lido" story |
 | **Automated monitoring + delivery** | Scheduled rules flag TVL crashes, one-day shocks, suspicious surges, incentive-heavy structures, stablecoin depegs and stale upstream data — each alert embeds the metric/threshold that fired it, persists idempotently per protocol/rule/day, and fans out to **console / webhook / Slack / Discord / Telegram / email** (every channel activates only when its env secret is set) |
 
+```
+ DefiLlama (TVL · fees · DEX volume · stablecoin prices — public, no key)
+     |
+     v
+ normalize to daily series  ──>  decompose price vs usage  ──>  7 weighted
+     |                             (fees/TVL, volume/TVL,        risk indicators
+     |                              peg deviation bps)           (each carries
+     v                             |                             evidence AND its
+ one dead protocol            missing feed?                     own limitation)
+ logged + skipped                 |                                  |
+     |                       -> visible data gap <-          composite 0-100
+     |                       (renormalized out,               + band, gaps
+     |                        never a fake "safe")                 |
+     v                             v                             v
+   DB snapshots  ──────────────> the research loop ─────────────────────┐
+   (daily, idempotent)          dashboard · alerts · briefs · chat ·    │
+                               export (md/csv/pdf)  <──────────────────┘
+```
+
 ## Quick start
 
 Prerequisites: [uv](https://docs.astral.sh/uv/), Node 20+.

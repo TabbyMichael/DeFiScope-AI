@@ -28,17 +28,19 @@ async function ProtocolContent({ params }: { params: Promise<{ slug: string }> }
   let brief: ResearchBrief | null = null;
   let riskHistory: RiskPoint[] = [];
   try {
-    data = await api.protocol(slug);
-    try {
-      brief = await api.brief(slug);
-    } catch {
-      brief = null; // brief generation failure must not break the research page
-    }
-    try {
-      riskHistory = await api.riskHistory(slug);
-    } catch {
-      riskHistory = []; // trend is best-effort; no snapshots yet is not an error
-    }
+    // Fan the three reads out concurrently: the page's time-to-first-byte is now
+    // the slowest of three sub-20ms DB reads, not their sum. ``protocol`` is the
+    // only required one - a rejection here is a real error (denial/404) and
+    // propagates to the catch below. The other two carry their own fallback, so
+    // a brief/trend failure degrades in place rather than sinking the page.
+    const [research, briefResult, riskResult] = await Promise.all([
+      api.protocol(slug),
+      api.brief(slug).catch(() => null),
+      api.riskHistory(slug).catch(() => [] as RiskPoint[]),
+    ]);
+    data = research;
+    brief = briefResult;
+    riskHistory = riskResult;
   } catch (e) {
     // An out-of-scope protocol is an authorization verdict, not a missing page.
     // Answering 404 would imply the protocol does not exist — the opposite of

@@ -23,11 +23,34 @@ services:
       timeout: 3s
       retries: 10
 
+  redis:
+    # The 4th container (alongside db, api, web): a disposable response cache for
+    # the catalog list/facet reads (Stage 3 perf). Built from ./services/redis so
+    # it ships a cache-tuned redis.conf (bounded maxmemory + allkeys-lru eviction,
+    # AOF) instead of Redis's stock `noeviction`/unbounded defaults. Strictly
+    # optional: if this is down or DEFISCOPE_REDIS_URL is unset the API simply
+    # serves every catalog read straight from Postgres - the cache is a speedup,
+    # never a dependency, and Postgres stays the source of truth. No host port is
+    # published: only the API, on the internal compose network, talks to it.
+    build: ./services/redis
+    image: defiscope-redis:latest
+    restart: unless-stopped
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
   api:
     build: ./services/api
     restart: unless-stopped
     environment:
       DEFISCOPE_DATABASE_URL: postgresql+psycopg://defiscope:defiscope@db:5432/defiscope
+      # Optional Redis catalog cache. Blank it (DEFISCOPE_REDIS_URL= in .env) to
+      # run fully uncached without removing the redis service.
+      DEFISCOPE_REDIS_URL: ${DEFISCOPE_REDIS_URL:-redis://redis:6379/0}
       DEFISCOPE_DEFAULT_PROTOCOLS: aave-v3,uniswap-v3,lido,curve-dex,compound-v3
       # Second data provider (on-chain activity). Both default to empty, which is
       # a supported state: the API then reports `unconfigured` for every protocol
@@ -80,6 +103,10 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      # No health gate needed: the cache is optional and the app degrades on a
+      # Redis outage, so a slow/failed redis must not block API startup.
+      redis:
+        condition: service_started
 
   web:
     build:
@@ -152,5 +179,6 @@ services:
 
 volumes:
   pgdata:
+  redis_data:
   ollama_data:
   open_webui_data:

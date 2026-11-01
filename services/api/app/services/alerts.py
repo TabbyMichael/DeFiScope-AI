@@ -277,58 +277,107 @@ def persist_alerts(session: Session, alerts: list[Alert]) -> None:
     session.commit()
 
 
-def persist_snapshots(session: Session, packs: list[ResearchPack]) -> None:
-    """Store one full observation per protocol per day (skip if already
-    captured). Writes the complete normalized overview so the dashboard can
-    render the board straight from the DB without a live DefiLlama call."""
+def _analysis_values(o, pack: ResearchPack) -> dict:
+    """The full research-payload column set derived from an overview + pack.
+
+    Shared by the insert and the in-place refresh in ``persist_snapshots`` so a
+    first capture and a same-day re-run write the exact same fields - the two
+    paths cannot drift.
+    """
+    risk_dict = pack.risk.to_dict() if pack.risk is not None else None
+    return {
+        "name": o.name,
+        "category": o.category,
+        "tvl": o.tvl,
+        "change_7d": o.change_7d,
+        "change_30d": o.change_30d,
+        "volatility_30d": o.volatility_30d,
+        "top_chain": o.top_chain,
+        "top_chain_share": o.top_chain_share,
+        "incentive_ratio": o.incentive_ratio,
+        "stale_days": o.stale_days,
+        "risk_score": o.risk_score,
+        "risk_band": o.risk_band,
+        "fees_1d": o.fees_1d,
+        "fees_30d": o.fees_30d,
+        "revenue_1d": o.revenue_1d,
+        "volume_1d": o.volume_1d,
+        "fees_tvl": o.fees_tvl,
+        "volume_tvl": o.volume_tvl,
+        "depeg_worst_bps": o.depeg_worst_bps,
+        "depeg_asset": o.depeg_asset,
+        "chain_shares": dict(pack.detail.current_chain_tvls or {}) or None,
+        "risk_json": risk_dict,
+    }
+
+
+def persist_snapshots(
+    session: Session, packs: list[ResearchPack], monitored: int = 1
+) -> None:
+    """Store one full observation per protocol per day, refreshing an existing
+    same-day row's analysis columns in place. Writes the complete normalized
+    overview (fees/volume/depeg/chain breakdown/risk JSON) so both the board
+    and the DB-first detail page render straight from the DB with no live
+    DefiLlama call.
+
+    ``monitored`` tags the *consumer* of the row, not its quality: 1 for
+    watchlist-pass rows that feed dashboard aggregates, 0 for catalog pre-seed
+    rows that exist only to make detail pages rich on first visit.
+
+    DefiLlama's daily point is immutable, so re-writing derived fields for an
+    existing (slug, date) row is idempotent - and necessary, because an earlier
+    pass may have captured the TVL before enrichment was available. The
+    ``captured_at`` refresh also keeps the dashboard's staleness check honest.
+    """
     for pack in packs:
         date = pack.latest_date
         if date is None:
             continue
+        o = pack_to_overview(pack)
+        staking_df = metrics.series_to_frame(pack.detail.staking_history)
+        staking = float(staking_df["tvl"].iloc[-1]) if not staking_df.empty else None
+        now = datetime.now(UTC)
         exists = (
             session.query(ProtocolSnapshot)
             .filter(ProtocolSnapshot.slug == pack.slug, ProtocolSnapshot.date == date)
             .first()
         )
-        if exists:
-            # Data for this (slug, date) is already captured and DefiLlama's
-            # daily point is immutable, so don't re-insert. But DO refresh the
-            # capture timestamp: the dashboard's staleness check reads
-            # max(captured_at), and leaving it frozen would make every request
-            # after 6h think the board is stale and re-trigger a live crawl.
-            exists.captured_at = datetime.now(UTC)
+        if exists is not None:
+            for key, value in _analysis_values(o, pack).items():
+                setattr(exists, key, value)
+            exists.staking_tvl = staking
+            # ``monitored`` is monotonic toward 1. A watchlist pass claims a
+            # protocol as board data (1); a later detail-only pre-seed (0) may
+            # re-persist the *same* (slug, date) row - it must refresh the
+            # analysis but NEVER demote the row off the board, or the board
+            # falls back to a bare backfill history row with no risk/change.
+            exists.monitored = 1 if (monitored == 1 or exists.monitored == 1) else 0
+            exists.captured_at = now
             continue
-        o = pack_to_overview(pack)
-        staking_df = metrics.series_to_frame(pack.detail.staking_history)
-        staking = float(staking_df["tvl"].iloc[-1]) if not staking_df.empty else None
         session.add(
             ProtocolSnapshot(
                 slug=pack.slug,
                 date=date,
-                name=o.name,
-                category=o.category,
-                tvl=o.tvl,
                 staking_tvl=staking,
-                change_7d=o.change_7d,
-                change_30d=o.change_30d,
-                volatility_30d=o.volatility_30d,
-                top_chain=o.top_chain,
-                top_chain_share=o.top_chain_share,
-                incentive_ratio=o.incentive_ratio,
-                stale_days=o.stale_days,
-                risk_score=o.risk_score,
-                risk_band=o.risk_band,
-                captured_at=datetime.now(UTC),
+                monitored=monitored,
+                captured_at=now,
+                **_analysis_values(o, pack),
             )
         )
     session.commit()
 
 
-def backfill_history(session: Session, pack: ResearchPack) -> None:
+def backfill_history(session: Session, pack: ResearchPack, monitored: int = 1) -> None:
     """On the first time we see a slug, seed protocol_snapshots with the full
     DefiLlama daily TVL series so history charts and sparklines are populated
     immediately rather than after days of scheduler runs. Derived/risk columns
-    are left null for historical rows (only the latest row needs them)."""
+    are left null for historical rows (only the latest row needs them).
+
+    ``monitored`` must mirror the value the caller passes to ``persist_snapshots``:
+    history rows feed the same board aggregates as the latest row, so a pre-seed
+    pass (``monitored = 0``) has to stamp them unmonitored too, or the seeded
+    protocols' backfilled TVL days would leak into the dashboard totals and the
+    staleness clock that the ``monitored`` guard exists to keep them out of."""
     df = pack.tvl_df
     if df is None or df.empty:
         return
@@ -343,6 +392,7 @@ def backfill_history(session: Session, pack: ResearchPack) -> None:
             name=pack.detail.name,
             tvl=round(float(val), 2),
             captured_at=now,
+            monitored=monitored,
         )
         for idx, val in df["tvl"].items()
         if str(idx.date()) != pack.latest_date  # latest handled by persist_snapshots
@@ -456,4 +506,22 @@ async def run_monitor(svc: ProtocolResearchService, http, session: Session) -> l
     for pack in packs:
         backfill_history(session, pack)  # seed full history on first sight
     persist_snapshots(session, packs)
+    # Fold this pass's scores back into the discovery catalog so the Explorer can
+    # sort and show an *available* risk score. Additive and best-effort: the
+    # catalog is a read model over monitoring output, never a second crawl, and a
+    # refresh failure must not change the alerts this pass returns.
+    try:
+        from app.services import cache, catalog
+
+        overviews = [pack_to_overview(p) for p in packs]
+        touched = catalog.refresh_analysis(
+            session,
+            [(p.slug, o.risk_score, o.risk_band) for p, o in zip(packs, overviews, strict=True)],
+        )
+        # Scores feed the catalog's risk sort and band filter, so retire cached
+        # pages whenever this pass actually folded any in (no-op without Redis).
+        if touched:
+            await cache.bump_version()
+    except Exception:  # noqa: BLE001 - catalog refresh is strictly optional
+        logger.exception("Catalog score refresh failed; monitoring result unchanged")
     return alerts

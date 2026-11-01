@@ -19,15 +19,18 @@ export async function POST(req: Request): Promise<NextResponse> {
 
   let upstream: Response;
   try {
-    upstream = await fetch(`${apiBase()}/api/auth/login`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email, password }),
-      cache: "no-store",
-      signal: AbortSignal.timeout(15_000),
-    });
+    upstream = await postLogin(email, password);
   } catch {
-    return NextResponse.json({ error: "Authentication service unreachable" }, { status: 502 });
+    // One retry, seconds later. The usual cause is not a dead API but a busy
+    // one: the startup catalog pre-seed can hold the API's single event loop
+    // for a stretch, and the first attempt times out mid-queue. By the second
+    // the loop has usually yielded again. A real outage just fails twice.
+    await new Promise((r) => setTimeout(r, 1_500));
+    try {
+      upstream = await postLogin(email, password);
+    } catch {
+      return NextResponse.json({ error: "Authentication service unreachable" }, { status: 502 });
+    }
   }
 
   const data = (await upstream.json().catch(() => ({}))) as {
@@ -49,6 +52,17 @@ export async function POST(req: Request): Promise<NextResponse> {
     sessionCookieOptions(maxAgeSeconds(data.expires_at)),
   );
   return response;
+}
+
+/** One upstream attempt. Generous timeout: a busy API answers late, not never. */
+function postLogin(email: string, password: string): Promise<Response> {
+  return fetch(`${apiBase()}/api/auth/login`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email, password }),
+    cache: "no-store",
+    signal: AbortSignal.timeout(30_000),
+  });
 }
 
 /** Cookie lifetime derived from the session row, not guessed. */

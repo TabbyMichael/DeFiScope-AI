@@ -226,6 +226,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/catalog/sync": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Sync Catalog
+         * @description Idempotently upsert the full DefiLlama directory into the catalog.
+         *
+         *     Returns per-outcome counters (inserted / updated / unchanged / skipped /
+         *     duplicates) so an operator can see the sync did not lose or duplicate rows.
+         *     Re-running it is safe: existing rows are updated in place and rows the
+         *     provider no longer lists are left untouched.
+         */
+        post: operations["sync_catalog_api_catalog_sync_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/chat": {
         parameters: {
             query?: never;
@@ -305,8 +330,38 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List Protocols */
+        /**
+         * List Protocols
+         * @description Paginated protocol discovery catalog, served entirely from the DB.
+         *
+         *     Pagination, search, filtering and sorting all happen server-side; only one
+         *     page of rows is ever returned. ``sort`` is bound to an allowlisted column
+         *     (see ``catalog.SORT_COLUMNS``) - the caller's string never reaches SQL as
+         *     text - and ordering is made deterministic with a slug tiebreak.
+         */
         get: operations["list_protocols_api_protocols_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/protocols/facets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Protocol Facets
+         * @description Distinct chain and category values present in the catalog, for the
+         *     Explorer's filter selectors. Declared before ``/{slug}`` so "facets" is not
+         *     swallowed as a protocol slug.
+         */
+        get: operations["protocol_facets_api_protocols_facets_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -411,6 +466,61 @@ export interface components {
             recommendations: string[];
             /** Risks */
             risks: string[];
+        };
+        /**
+         * CatalogFacets
+         * @description Distinct filter values for the Explorer's chain / category selectors.
+         *
+         *     Sourced from the stored catalog rather than a hardcoded list, so the options
+         *     track what was actually discovered.
+         */
+        CatalogFacets: {
+            /** Categories */
+            categories?: string[];
+            /** Chains */
+            chains?: string[];
+        };
+        /**
+         * CatalogPageSize
+         * @description Closed set of page sizes the catalog Explorer may request.
+         *
+         *     An ``IntEnum`` rather than ``Literal[25, 50, 100]`` on purpose: FastAPI binds
+         *     query parameters as *strings*, and Pydantic coerces a numeric string into an
+         *     int enum but refuses to coerce it into an integer ``Literal`` - so the latter
+         *     would reject every legitimate ``?page_size=25`` request with a 422. Enumerating
+         *     here still emits the closed ``[25, 50, 100]`` set in the OpenAPI schema.
+         * @enum {integer}
+         */
+        CatalogPageSize: 25 | 50 | 100;
+        /**
+         * CatalogSyncStats
+         * @description Outcome of one catalog synchronization, returned by the sync endpoint.
+         *
+         *     Every counter is reported rather than hidden behind a bare "ok": an operator
+         *     needs to see how many rows were inserted vs updated vs left alone, and which
+         *     malformed entries were skipped, to trust that a sync did not lose data.
+         */
+        CatalogSyncStats: {
+            /** Completed At */
+            completed_at: string;
+            /** Duplicates */
+            duplicates: number;
+            /** Duration Seconds */
+            duration_seconds: number;
+            /** Errors */
+            errors?: string[];
+            /** Fetched */
+            fetched: number;
+            /** Inserted */
+            inserted: number;
+            /** Skipped */
+            skipped: number;
+            /** Total After */
+            total_after: number;
+            /** Unchanged */
+            unchanged: number;
+            /** Updated */
+            updated: number;
         };
         /** ChainShare */
         ChainShare: {
@@ -585,6 +695,87 @@ export interface components {
             tx_count?: number | null;
             /** Tx Volume Usd */
             tx_volume_usd?: number | null;
+        };
+        /**
+         * ProtocolCatalogItem
+         * @description One row of the discovery catalog, as the Explorer lists it.
+         *
+         *     Deliberately *not* ``ProtocolOverview``: the catalog spans thousands of
+         *     protocols of which only a handful are monitored, so it carries the identity
+         *     and market-metadata DefiLlama supplies for everyone, plus the risk fields
+         *     only a scored protocol has. Missing metrics stay ``None`` (a gap), never 0.
+         */
+        ProtocolCatalogItem: {
+            /** Audits */
+            audits?: string | null;
+            /** Category */
+            category?: string | null;
+            /** Chains */
+            chains?: string[];
+            /** Change 1D */
+            change_1d?: number | null;
+            /** Change 1M */
+            change_1m?: number | null;
+            /** Change 7D */
+            change_7d?: number | null;
+            /** Listing Timestamp */
+            listing_timestamp?: number | null;
+            /**
+             * Monitored
+             * @default false
+             */
+            monitored: boolean;
+            /** Name */
+            name: string;
+            /**
+             * Risk Band
+             * @default unknown
+             */
+            risk_band: string;
+            /** Risk Score */
+            risk_score?: number | null;
+            /** Slug */
+            slug: string;
+            /** Symbol */
+            symbol?: string | null;
+            /** Tvl */
+            tvl?: number | null;
+            /** Updated At */
+            updated_at?: string | null;
+            /** Url */
+            url?: string | null;
+        };
+        /**
+         * ProtocolCatalogPage
+         * @description A single page of the catalog plus the metadata the Explorer needs.
+         *
+         *     ``total`` is the count of rows matching the active filters (before paging),
+         *     ``pages`` the derived page count - both computed server-side so the UI never
+         *     loads the whole catalog to paginate locally.
+         */
+        ProtocolCatalogPage: {
+            /** Band */
+            band?: string | null;
+            /** Category */
+            category?: string | null;
+            /** Chain */
+            chain?: string | null;
+            /** Items */
+            items?: components["schemas"]["ProtocolCatalogItem"][];
+            /** Order */
+            order: string;
+            /** Page */
+            page: number;
+            /** Page Size */
+            page_size: number;
+            /** Pages */
+            pages: number;
+            /** Q */
+            q?: string | null;
+            /** Sort */
+            sort: string;
+            /** Total */
+            total: number;
         };
         /** ProtocolOverview */
         ProtocolOverview: {
@@ -1092,6 +1283,26 @@ export interface operations {
             };
         };
     };
+    sync_catalog_api_catalog_sync_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CatalogSyncStats"];
+                };
+            };
+        };
+    };
     chat_api_chat_post: {
         parameters: {
             query?: never;
@@ -1187,6 +1398,50 @@ export interface operations {
     };
     list_protocols_api_protocols_get: {
         parameters: {
+            query?: {
+                /** @description 1-based page number */
+                page?: number;
+                /** @description rows per page */
+                page_size?: components["schemas"]["CatalogPageSize"];
+                /** @description search name or slug */
+                q?: string | null;
+                /** @description filter by chain */
+                chain?: string | null;
+                /** @description filter by category */
+                category?: string | null;
+                /** @description filter by risk band */
+                band?: string | null;
+                sort?: "tvl" | "name" | "updated" | "risk";
+                order?: "asc" | "desc";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProtocolCatalogPage"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    protocol_facets_api_protocols_facets_get: {
+        parameters: {
             query?: never;
             header?: never;
             path?: never;
@@ -1200,7 +1455,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProtocolOverview"][];
+                    "application/json": components["schemas"]["CatalogFacets"];
                 };
             };
         };

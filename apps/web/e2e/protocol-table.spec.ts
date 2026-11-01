@@ -1,15 +1,15 @@
 import { expect, test } from "@playwright/test";
 
-const BANDS = ["low", "moderate", "elevated", "high", "unknown"] as const;
+// The Dashboard's "Protocols" section is now a fully server-paginated view over
+// the discovery catalog (the embedded Protocol Explorer). Every control writes
+// the current view back to the URL (via the history API), so the assertions here
+// verify the client contract - that interactions become server queries - rather
+// than coupling to a specific provider dataset that may be empty in a given run.
+//
+// The Explorer always renders its controls, so the URL-driving tests are robust
+// even before any rows load; row/pagination tests skip when the catalog is empty.
 
-// Each row's last cell holds the RiskBadge: "<band><optional score>". Parse the
-// leading band token so we can assert filters without coupling to score values.
-function bandOf(text: string): string | undefined {
-  const trimmed = text.trim();
-  return BANDS.find((b) => trimmed.startsWith(b));
-}
-
-test.describe("protocol table", () => {
+test.describe("protocol catalog (dashboard explorer)", () => {
   test.beforeEach(async ({ page }) => {
     await page.goto("/");
     await expect(page.getByRole("heading", { name: "Overview" })).toBeVisible({
@@ -17,47 +17,39 @@ test.describe("protocol table", () => {
     });
   });
 
-  test("sorts protocols by name (asc then desc)", async ({ page }) => {
-    const names = page.locator('main table tbody a[href^="/protocols/"]');
-    test.skip((await names.count()) < 2, "need at least two protocols to sort");
-
-    // Column defaults to TVL desc; clicking "Protocol" switches to name asc.
-    await page.getByRole("button", { name: "Protocol" }).click();
-    const asc = await names.allTextContents();
-    expect(asc).toEqual([...asc].sort((a, b) => a.localeCompare(b)));
-
-    // A second click flips the same column to desc.
-    await page.getByRole("button", { name: "Protocol" }).click();
-    const desc = await names.allTextContents();
-    expect(desc).toEqual([...asc].reverse());
+  test("lists catalog protocols that link to their research pages", async ({
+    page,
+  }) => {
+    const links = page.locator('main a[href^="/protocols/"]');
+    test.skip((await links.count()) < 1, "no catalog rows rendered (empty dataset)");
+    const href = await links.first().getAttribute("href");
+    expect(href).toMatch(/^\/protocols\/.+/);
   });
 
-  test("filters protocols by risk band", async ({ page }) => {
-    const badges = page.locator("main table tbody tr td:last-child");
-    const total = await badges.count();
-    test.skip(total < 1, "no protocols rendered yet (empty dataset)");
+  test("sort, band and page-size controls drive server queries reflected in the URL", async ({
+    page,
+  }) => {
+    // Sort by name (A-Z).
+    await page.getByRole("combobox", { name: "Sort by" }).click();
+    await page.getByRole("option", { name: "Name", exact: true }).click();
+    await expect(page).toHaveURL(/sort=name/);
 
-    const initialBands = (await badges.allTextContents()).map(bandOf);
-    const present = Array.from(new Set(initialBands.filter(Boolean))) as string[];
-    test.skip(present.length === 0, "no protocol has a resolvable risk band");
-
-    // Pick a band that exists so the filtered result is guaranteed non-empty,
-    // then assert every surviving row carries that band.
-    const target = present[0];
-    const expectedRows = initialBands.filter((b) => b === target).length;
-
-    // The shadcn Select trigger exposes role="combobox" with the label set on
-    // the trigger (aria-label), so name it rather than looking for a button.
+    // Filter to a single risk band.
     await page.getByRole("combobox", { name: "Filter by risk band" }).click();
-    await page.getByRole("option", { name: target, exact: true }).click();
+    await page.getByRole("option", { name: "high", exact: true }).click();
+    await expect(page).toHaveURL(/band=high/);
 
-    await expect(
-      page.getByRole("combobox", { name: "Filter by risk band" }),
-    ).toContainText(target);
-    const filtered = page.locator("main table tbody tr td:last-child");
-    await expect(filtered).toHaveCount(expectedRows);
-    for (const text of await filtered.allTextContents()) {
-      expect(bandOf(text)).toBe(target);
-    }
+    // Change the server page size.
+    await page.getByRole("combobox", { name: "Rows per page" }).click();
+    await page.getByRole("option", { name: "100 / page", exact: true }).click();
+    await expect(page).toHaveURL(/page_size=100/);
+  });
+
+  test("pagination advances to the next server page", async ({ page }) => {
+    const next = page.getByRole("button", { name: "Next page" });
+    // Only meaningful when the catalog spans more than one page.
+    test.skip((await next.count()) === 0, "catalog fits on a single page");
+    await next.click();
+    await expect(page).toHaveURL(/[?&]page=2/);
   });
 });

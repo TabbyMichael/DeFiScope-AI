@@ -16,8 +16,11 @@ from app.config import get_settings
 from app.db import SessionLocal, engine, init_db
 from app.rag.ingest import load_index, reindex
 from app.rag.service import RagService
-from app.routers import alerts, auth, briefs, chat, dashboard, protocols
+from app.routers import alerts, auth, briefs, catalog, chat, dashboard, protocols
 from app.security.seed import seed_demo_users
+from app.services import cache
+from app.services import catalog as catalog_service
+from app.services import preseed as preseed_service
 from app.services.protocols import ProtocolResearchService
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
@@ -64,13 +67,66 @@ async def lifespan(app: FastAPI):
     # dashboard's live-fallback covers the brief window before it completes.
     app.state.warmup_task = asyncio.create_task(_warmup(app.state))
     app.state.ingest_task = asyncio.create_task(_ingest(app.state))
+    app.state.catalog_task = asyncio.create_task(_catalog_sync(app.state))
+    app.state.preseed_task = asyncio.create_task(_preseed(app.state, app.state.catalog_task))
 
     yield
 
     app.state.warmup_task.cancel()
     app.state.ingest_task.cancel()
+    app.state.catalog_task.cancel()
+    app.state.preseed_task.cancel()
     scheduler.shutdown(wait=False)
     await app.state.http.aclose()
+    await cache.aclose()
+
+
+async def _catalog_sync(state) -> None:
+    """Populate the discovery catalog on startup (best-effort).
+
+    This is a metadata-only directory read, run as its own background task so it
+    never delays the port binding and never triggers the analytics crawl. Once
+    the rows exist, any scores already captured by monitoring are folded in."""
+    session = SessionLocal()
+    try:
+        await catalog_service.ensure_populated(session, state.research_service.client, state.http)
+        folded = catalog_service.refresh_analysis_from_snapshots(session)
+        if folded:
+            # ensure_populated already retired the cache if it synced; a score
+            # fold changes the risk columns too, so bump again when it touches.
+            await cache.bump_version()
+            logger.info("Folded %d monitored protocol(s) into the catalog", folded)
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:  # noqa: BLE001 - never let catalog sync crash startup
+        logger.warning("Startup catalog sync failed (reads serve an empty page): %s", exc)
+    finally:
+        session.close()
+
+
+async def _preseed(state, catalog_task: asyncio.Task) -> None:
+    """Warm detail pages by seeding the unmonitored catalog in bounded batches.
+
+    Waits for the startup catalog sync first (the seed queue *is* the catalog,
+    so draining it before it exists would just spin on an empty table) - even
+    if that task failed, its exceptions are caught inside, and an empty/partial
+    catalog simply means an empty/partial queue: nothing to seed until the next
+    sync. Runs entirely off the event loop; cancelled with the lifespan."""
+    try:
+        await catalog_task
+    except asyncio.CancelledError:
+        raise
+    except Exception:  # noqa: BLE001 - _catalog_sync swallows; this is belt & braces
+        logger.warning("Catalog sync task failed; pre-seed proceeds with what exists")
+    session = SessionLocal()
+    try:
+        await preseed_service.seed_loop(state.research_service, state.http, session)
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:  # noqa: BLE001 - seeding must not crash the app
+        logger.warning("Catalog pre-seed loop failed (detail pages stay gap-only): %s", exc)
+    finally:
+        session.close()
 
 
 async def _warmup(state) -> None:
@@ -149,6 +205,7 @@ app.add_middleware(
 
 app.include_router(auth.router)
 app.include_router(protocols.router)
+app.include_router(catalog.router)
 app.include_router(briefs.router)
 app.include_router(alerts.router)
 app.include_router(dashboard.router)
