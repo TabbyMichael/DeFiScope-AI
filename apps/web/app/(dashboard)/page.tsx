@@ -15,7 +15,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { api } from "@/lib/api";
+import { ApiError, api } from "@/lib/api";
 import {
   parseExplorerState,
   toCatalogQuery,
@@ -73,24 +73,40 @@ async function DashboardContent({
   const catalogState = parseExplorerState(await searchParams);
   let data: DashboardResponse | null = null;
   let error: string | null = null;
+  /* Did the API answer, or did nothing pick up? */
+  let answered = false;
   try {
     data = await api.dashboard();
   } catch (e) {
     error = e instanceof Error ? e.message : String(e);
+    answered = e instanceof ApiError;
   }
 
   if (error || !data) {
+    /* Two failures wear the same face here and they are not the same problem.
+       A refused connection means the backend is not running, so the fix is to
+       start it. An HTTP status means it is running and said no, and telling
+       someone to start a process that is already up sends them down the wrong
+       path. The message underneath carries the URL that was tried either way. */
     return (
       <div className="rounded-lg border border-red-500/40 bg-red-500/10 p-4 text-sm sm:p-6">
         <h2 className="mb-1 flex items-center gap-2 font-semibold text-red-600 dark:text-red-300">
-          <AlertTriangle className="size-4" /> API unavailable
+          <AlertTriangle className="size-4" />
+          {answered ? "API error" : "API unavailable"}
         </h2>
-        <p className="text-red-700/80 dark:text-red-200/80">
-          Could not reach the DeFiScope API. Start the backend with{" "}
-          <code className="block break-all rounded bg-muted px-1.5 py-0.5 text-xs sm:inline-block">
-            cd services/api &amp;&amp; uv run uvicorn app.main:app --port 8000
-          </code>
-        </p>
+        {answered ? (
+          <p className="text-red-700/80 dark:text-red-200/80">
+            The API is reachable but returned an error instead of the board, so
+            the backend is running. The status and detail are below.
+          </p>
+        ) : (
+          <p className="text-red-700/80 dark:text-red-200/80">
+            Could not reach the DeFiScope API. Start the backend with{" "}
+            <code className="block break-all rounded bg-muted px-1.5 py-0.5 text-xs sm:inline-block">
+              cd services/api &amp;&amp; uv run uvicorn app.main:app --port 8000
+            </code>
+          </p>
+        )}
         <p className="mt-2 text-xs text-red-600/60 dark:text-red-400/60">{error}</p>
       </div>
     );

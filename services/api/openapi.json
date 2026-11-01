@@ -311,6 +311,227 @@
         "title": "ChatRequest",
         "type": "object"
       },
+      "CoverageStatus": {
+        "description": "Public, aggregate view of what the service has actually observed.\n\nEvery count is nullable, and the null is load-bearing: ``null`` means\n\"could not be measured\" (the store was unreachable, or a probe failed)\nwhile ``0`` means \"measured, and there are none\". A landing page that\nrenders this must show the difference - reporting zero for an unreachable\ndatabase would be the exact lie the rest of the product is built to avoid.\n\nNo row-level data and no secrets are exposed here: configuration flags are\nreported as booleans (``llm_configured``), never as values.",
+        "properties": {
+          "alerts_7d": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Alerts 7D"
+          },
+          "alerts_by_severity": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "integer"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Alerts By Severity"
+          },
+          "alerts_total": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Alerts Total"
+          },
+          "as_of": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "As Of"
+          },
+          "bands": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "integer"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bands"
+          },
+          "captured_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Captured At"
+          },
+          "categories": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Categories"
+          },
+          "chains": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Chains"
+          },
+          "index_chunks": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Index Chunks"
+          },
+          "llm_configured": {
+            "default": false,
+            "title": "Llm Configured",
+            "type": "boolean"
+          },
+          "monitor_interval_minutes": {
+            "default": 30,
+            "title": "Monitor Interval Minutes",
+            "type": "integer"
+          },
+          "observation_days": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Observation Days"
+          },
+          "onchain_chains": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Onchain Chains"
+          },
+          "onchain_configured": {
+            "default": false,
+            "title": "Onchain Configured",
+            "type": "boolean"
+          },
+          "onchain_observations": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Onchain Observations"
+          },
+          "onchain_protocols": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Onchain Protocols"
+          },
+          "protocols_curated": {
+            "default": 0,
+            "title": "Protocols Curated",
+            "type": "integer"
+          },
+          "protocols_scored": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Protocols Scored"
+          },
+          "protocols_tracked": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Protocols Tracked"
+          },
+          "scored_observations": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scored Observations"
+          },
+          "status": {
+            "enum": [
+              "ok",
+              "empty",
+              "unavailable"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "CoverageStatus",
+        "type": "object"
+      },
       "DashboardResponse": {
         "description": "Everything the dashboard needs, sourced from the DB (latest snapshot\nper protocol + alert_records) with a live DefiLlama hydration fallback.\n\n``withheld_alerts`` is the number of critical alerts the caller's clearance\nwas not sufficient to read. It is reported rather than hidden: a board that\nsilently shows three fewer alerts than exist would be lying by omission.",
         "properties": {
@@ -2363,6 +2584,28 @@
         "summary": "Protocol Risk History",
         "tags": [
           "dashboard"
+        ]
+      }
+    },
+    "/api/status": {
+      "get": {
+        "description": "Aggregate coverage of the store: protocols, days, bands, alerts, index.",
+        "operationId": "status_api_status_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CoverageStatus"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Status",
+        "tags": [
+          "meta"
         ]
       }
     }

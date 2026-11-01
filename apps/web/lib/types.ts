@@ -52,3 +52,9 @@ export type SubjectOut = DeepRequired<Schemas["SubjectOut"]>;
 export type LoginResponse = DeepRequired<Schemas["LoginResponse"]>;
 export type TicketResponse = DeepRequired<Schemas["TicketResponse"]>;
 
+// Public coverage aggregate (GET /api/status). Nullable counts stay nullable:
+// `null` means "not measured", `0` means "measured, none", and the landing
+// renders those two states differently, so `DeepRequired` (which only removes
+// the "missing" state) is exactly right here.
+export type CoverageStatus = DeepRequired<Schemas["CoverageStatus"]>;
+

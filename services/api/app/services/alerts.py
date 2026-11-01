@@ -12,6 +12,7 @@ import hashlib
 import logging
 from datetime import UTC, datetime, timedelta
 
+from sqlalchemy.dialects import postgresql, sqlite
 from sqlalchemy.orm import Session
 
 from app.analysis import metrics
@@ -277,6 +278,34 @@ def persist_alerts(session: Session, alerts: list[Alert]) -> None:
     session.commit()
 
 
+def _dialect_insert(session: Session):
+    """The INSERT flavour the bound engine understands, so `ON CONFLICT` compiles
+    on both backends the project runs: SQLite for dev and tests, PostgreSQL in
+    compose."""
+    name = session.get_bind().dialect.name
+    return postgresql.insert if name == "postgresql" else sqlite.insert
+
+
+def _insert_snapshots_ignoring_conflicts(session: Session, rows: list[dict[str, object]]) -> None:
+    """Write snapshot rows and let the database arbitrate duplicates.
+
+    Both callers used to answer "is this row already there?" with a SELECT and
+    then an INSERT, which is a race rather than a check: the scheduler's
+    30-minute pass and the dashboard's cold hydration can each see an empty
+    history for the same slug, and the loser's commit then dies on
+    ``uq_snapshot_slug_date``. An unhandled IntegrityError reaches the visitor as
+    ``API /api/dashboard failed: 500``. ``ON CONFLICT DO NOTHING`` moves the
+    decision into the statement itself, so losing the race writes nothing.
+
+    The SELECT guards stay: they are what keeps a routine pass from re-sending a
+    thousand-row insert for every protocol.
+    """
+    if not rows:
+        return
+    stmt = _dialect_insert(session)(ProtocolSnapshot.__table__).values(rows)
+    session.execute(stmt.on_conflict_do_nothing(index_elements=["slug", "date"]))
+
+
 def _analysis_values(o, pack: ResearchPack) -> dict:
     """The full research-payload column set derived from an overview + pack.
 
@@ -315,10 +344,10 @@ def persist_snapshots(
     session: Session, packs: list[ResearchPack], monitored: int = 1
 ) -> None:
     """Store one full observation per protocol per day, refreshing an existing
-    same-day row's analysis columns in place. Writes the complete normalized
-    overview (fees/volume/depeg/chain breakdown/risk JSON) so both the board
-    and the DB-first detail page render straight from the DB with no live
-    DefiLlama call.
+    same-day row's analysis columns in place and letting the database arbitrate
+    duplicate inserts. Writes the complete normalized overview (fees/volume/
+    depeg/chain breakdown/risk JSON) so both the board and the DB-first detail
+    page render straight from the DB with no live DefiLlama call.
 
     ``monitored`` tags the *consumer* of the row, not its quality: 1 for
     watchlist-pass rows that feed dashboard aggregates, 0 for catalog pre-seed
@@ -329,6 +358,7 @@ def persist_snapshots(
     pass may have captured the TVL before enrichment was available. The
     ``captured_at`` refresh also keeps the dashboard's staleness check honest.
     """
+    rows: list[dict[str, object]] = []
     for pack in packs:
         date = pack.latest_date
         if date is None:
@@ -354,16 +384,17 @@ def persist_snapshots(
             exists.monitored = 1 if (monitored == 1 or exists.monitored == 1) else 0
             exists.captured_at = now
             continue
-        session.add(
-            ProtocolSnapshot(
-                slug=pack.slug,
-                date=date,
-                staking_tvl=staking,
-                monitored=monitored,
-                captured_at=now,
+        rows.append(
+            {
+                "slug": pack.slug,
+                "date": date,
+                "staking_tvl": staking,
+                "monitored": monitored,
+                "captured_at": now,
                 **_analysis_values(o, pack),
-            )
+            }
         )
+    _insert_snapshots_ignoring_conflicts(session, rows)
     session.commit()
 
 
@@ -386,18 +417,18 @@ def backfill_history(session: Session, pack: ResearchPack, monitored: int = 1) -
         return
     now = datetime.now(UTC)
     rows = [
-        ProtocolSnapshot(
-            slug=pack.slug,
-            date=str(idx.date()),
-            name=pack.detail.name,
-            tvl=round(float(val), 2),
-            captured_at=now,
-            monitored=monitored,
-        )
+        {
+            "slug": pack.slug,
+            "date": str(idx.date()),
+            "name": pack.detail.name,
+            "tvl": round(float(val), 2),
+            "captured_at": now,
+            "monitored": monitored,
+        }
         for idx, val in df["tvl"].items()
         if str(idx.date()) != pack.latest_date  # latest handled by persist_snapshots
     ]
-    session.add_all(rows)
+    _insert_snapshots_ignoring_conflicts(session, rows)
     session.commit()
 
 

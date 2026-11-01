@@ -133,6 +133,12 @@ class Settings(BaseSettings):
     # The public API has no documented rate limit; keep this modest.
     crawl_concurrency: int = 8
 
+    # How often the scheduler re-evaluates every tracked protocol. Published on
+    # the public /api/status response and rendered on the landing page, so the
+    # claimed freshness is the configured reality rather than a constant that
+    # could drift away from the code that schedules the pass.
+    monitor_interval_minutes: int = 30
+
     # Bound on the in-process per-protocol research cache (LRU). Keeps memory
     # flat on long-lived processes that discover the whole market.
     research_cache_max_entries: int = 256
