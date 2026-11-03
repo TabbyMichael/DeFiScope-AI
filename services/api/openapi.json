@@ -425,7 +425,7 @@
             "type": "boolean"
           },
           "monitor_interval_minutes": {
-            "default": 30,
+            "default": 2,
             "title": "Monitor Interval Minutes",
             "type": "integer"
           },
@@ -1747,6 +1747,111 @@
         ],
         "title": "ValidationError",
         "type": "object"
+      },
+      "WatchlistPageResponse": {
+        "description": "One server-paginated page of the risk watchlist over the full market.\n\n``items`` is exactly one page (``size`` rows) of latest monitored snapshots,\nalready sorted/filtered/searched in SQL. ``total`` is the count of monitored\nprotocols matching the active band/search + the caller's data scope (before\npaging) and ``pages`` the derived page count - both computed server-side so\nthe UI never fetches all ~5000 rows to paginate locally.\n\n``stats``/``band_counts``/``as_of`` describe the *whole* scoped board, not\njust this page (or the active band filter): the hero tiles must read the\ntrue market totals while the table shows a page. ``withheld`` mirrors the\ndashboard's alert-withholding count for the caller's clearance.",
+        "properties": {
+          "as_of": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "As Of"
+          },
+          "band": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Band"
+          },
+          "band_counts": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Band Counts",
+            "type": "object"
+          },
+          "dir": {
+            "title": "Dir",
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ProtocolOverview"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "page": {
+            "title": "Page",
+            "type": "integer"
+          },
+          "pages": {
+            "title": "Pages",
+            "type": "integer"
+          },
+          "q": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Q"
+          },
+          "size": {
+            "title": "Size",
+            "type": "integer"
+          },
+          "sort": {
+            "title": "Sort",
+            "type": "string"
+          },
+          "stats": {
+            "$ref": "#/components/schemas/DashboardStats"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          },
+          "withheld": {
+            "default": 0,
+            "title": "Withheld",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "total",
+          "page",
+          "size",
+          "pages",
+          "sort",
+          "dir",
+          "stats"
+        ],
+        "title": "WatchlistPageResponse",
+        "type": "object"
+      },
+      "WatchlistPageSize": {
+        "description": "Closed set of page sizes the market-wide watchlist may request.\n\nAn ``IntEnum`` (not an integer ``Literal``) for the same reason as\n``CatalogPageSize``: FastAPI binds query params as strings and Pydantic\ncoerces a numeric string into an int enum but refuses to coerce it into an\ninteger ``Literal`` - the latter would 422 every legitimate ``?size=50``.\nStill emits the closed ``[50, 100, 200]`` set in OpenAPI.",
+        "enum": [
+          50,
+          100,
+          200
+        ],
+        "title": "WatchlistPageSize",
+        "type": "integer"
       }
     }
   },
@@ -2239,7 +2344,7 @@
     },
     "/api/protocols": {
       "get": {
-        "description": "Paginated protocol discovery catalog, served entirely from the DB.\n\nPagination, search, filtering and sorting all happen server-side; only one\npage of rows is ever returned. ``sort`` is bound to an allowlisted column\n(see ``catalog.SORT_COLUMNS``) - the caller's string never reaches SQL as\ntext - and ordering is made deterministic with a slug tiebreak.",
+        "description": "Paginated protocol discovery catalog, served entirely from the DB.\n\nPagination, search, filtering and sorting all happen server-side; only one\npage of rows is ever returned. ``sort`` is bound to an allowlisted column\n(see ``catalog.SORT_COLUMNS``) - the caller's string never reaches SQL as\ntext - and ordering is made deterministic with a slug tiebreak.\n\nA successful page is cached in Redis (when configured) keyed by the query\n*and* the caller's scope; a cache hit skips the cold-start check, both\n``COUNT``s and the paged scan. With no Redis set every cache helper no-ops\nand this is exactly the uncached DB read it was before.",
         "operationId": "list_protocols_api_protocols_get",
         "parameters": [
           {
@@ -2404,7 +2509,7 @@
     },
     "/api/protocols/facets": {
       "get": {
-        "description": "Distinct chain and category values present in the catalog, for the\nExplorer's filter selectors. Declared before ``/{slug}`` so \"facets\" is not\nswallowed as a protocol slug.",
+        "description": "Distinct chain and category values present in the catalog, for the\nExplorer's filter selectors. Declared before ``/{slug}`` so \"facets\" is not\nswallowed as a protocol slug.\n\nCached in Redis (when configured) by the catalog version; a hit skips the\ncold-start check and the two distinct scans. Uncached/faulted reads degrade\nto the current database path unchanged.",
         "operationId": "protocol_facets_api_protocols_facets_get",
         "responses": {
           "200": {
@@ -2426,6 +2531,7 @@
     },
     "/api/protocols/{slug}": {
       "get": {
+        "description": "One protocol's research payload, assembled entirely from the DB.\n\nNo longer a live DefiLlama crawl: the monitoring/pre-seed pass persists every\nfield this renders, so opening a page is an indexed row read (sub-20ms) and a\nDefiLlama outage cannot slow it. A listed-but-uncaptured slug returns the\ncatalog header with analysis fields as honest gaps; a slug with no catalog\nrow *and* no snapshot is a genuine 404. Scope is enforced against the loaded\nrow's category/chain exactly as the crawl path did, so a slug can never be\nopened out of scope nor hidden in scope.",
         "operationId": "protocol_detail_api_protocols__slug__get",
         "parameters": [
           {
@@ -2606,6 +2712,137 @@
         "summary": "Status",
         "tags": [
           "meta"
+        ]
+      }
+    },
+    "/api/watchlist": {
+      "get": {
+        "description": "Market-wide risk watchlist, server-paginated over every monitored\nprotocol (~5000) entirely in SQL - sorting, band filter, search and paging\nall happen server-side, so only one page of rows is ever serialized.\n\nThe same ``protocols:read`` RBAC gate and ABAC ``scope`` narrowing as the\ndashboard are applied *in the query*, so ``total``, the page and the hero\naggregates all reflect only what the caller may see - a scoped analyst can\nnever bypass scope by URL to count or read rows they cannot open. The hero\nstats/band counts span the whole scoped board (not just this page); spark\nlines are fetched only for the returned page.",
+        "operationId": "watchlist_api_watchlist_get",
+        "parameters": [
+          {
+            "description": "1-based page number",
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "description": "1-based page number",
+              "maximum": 100000,
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "rows per page",
+            "in": "query",
+            "name": "size",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/WatchlistPageSize",
+              "default": 100,
+              "description": "rows per page"
+            }
+          },
+          {
+            "description": "sort column",
+            "in": "query",
+            "name": "sort",
+            "required": false,
+            "schema": {
+              "default": "risk",
+              "description": "sort column",
+              "enum": [
+                "risk",
+                "tvl",
+                "7d",
+                "30d"
+              ],
+              "title": "Sort",
+              "type": "string"
+            }
+          },
+          {
+            "description": "sort direction",
+            "in": "query",
+            "name": "dir",
+            "required": false,
+            "schema": {
+              "default": "desc",
+              "description": "sort direction",
+              "enum": [
+                "asc",
+                "desc"
+              ],
+              "title": "Dir",
+              "type": "string"
+            }
+          },
+          {
+            "description": "filter by risk band",
+            "in": "query",
+            "name": "band",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 40,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "filter by risk band",
+              "title": "Band"
+            }
+          },
+          {
+            "description": "search name or slug",
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 120,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "search name or slug",
+              "title": "Q"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WatchlistPageResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Watchlist",
+        "tags": [
+          "dashboard"
         ]
       }
     }

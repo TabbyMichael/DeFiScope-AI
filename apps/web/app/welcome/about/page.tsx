@@ -79,7 +79,7 @@ const CHAPTERS = [
 
 /* -------------------------------------------------------------- the headline
    Each figure is a property of the shipped code, not a marketing number:
-   seven indicator weights that sum to 1.00, six rules, a 30 minute pass, six
+   seven indicator weights that sum to 1.00, six rules, a 2 minute pass, six
    notifier channels, four roles, three clearance levels, two providers, and
    zero keys required to see the board. */
 const STATS = [
@@ -94,7 +94,7 @@ const STATS = [
     note: "Each alert stores the metric, the observed value and the threshold.",
   },
   {
-    value: "30 min",
+    value: "2 min",
     label: "monitor pass",
     note: "Scheduled, and idempotent per protocol, rule and day.",
   },
@@ -198,7 +198,7 @@ const PIPELINE = [
   },
   {
     title: "Monitor and deliver",
-    text: "The scheduler runs the rules every 30 minutes. Alert ids are deterministic per protocol, rule and day, so a re run cannot duplicate a finding, and each channel only fires if its credential is set.",
+    text: "The scheduler runs the rules every 2 minutes. Alert ids are deterministic per protocol, rule and day, so a re run cannot duplicate a finding, and each channel only fires if its credential is set.",
   },
 ] as const;
 
@@ -614,7 +614,7 @@ const FAQS = [
   },
   {
     q: "How current is what I am looking at?",
-    a: "The monitoring pass runs every 30 minutes, and every payload carries an as_of date marking the latest underlying observation. Staleness is itself a rule: if the last observation is older than two days a stale_data alert fires, because upstream collection failure should be visible before it contaminates a conclusion.",
+    a: "The monitoring pass runs every 2 minutes, and every payload carries an as_of date marking the latest underlying observation. Staleness is itself a rule: if the last observation is older than two days a stale_data alert fires, because upstream collection failure should be visible before it contaminates a conclusion. Note that DefiLlama republishes headline daily TVL only hourly, so a faster pass reacts sooner to upstream changes and to the intra day series (fees, volume, peg prices) rather than inventing a newer TVL print than the source has published.",
   },
   {
     q: "Can I change the thresholds?",

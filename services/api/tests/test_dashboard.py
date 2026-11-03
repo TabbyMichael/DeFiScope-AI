@@ -8,6 +8,7 @@ from app.analysis import metrics, scoring
 from app.clients.defillama import ProtocolDetail, ProtocolSummary
 from app.db import Base, ProtocolSnapshot, SessionLocal, engine
 from app.schemas import Alert
+from app.security.principal import Scope
 from app.services import alerts, dashboard
 
 DAY = 86_400
@@ -210,3 +211,197 @@ class TestDashboardFallback:
         monkeypatch.setattr(alerts, "run_monitor", boom)
         resp = await dashboard.get_dashboard(svc=None, http=None, session=session)
         assert resp.stats.protocol_count == 1
+
+
+def psnap(
+    slug,
+    *,
+    date="2026-02-01",
+    tvl=100.0,
+    name=None,
+    category="Lending",
+    top_chain="Ethereum",
+    band=None,
+    risk_score=None,
+    change_7d=None,
+    change_30d=None,
+    monitored=1,
+    captured_at=None,
+):
+    """A fully-populated snapshot row for the paginated/summary reads."""
+    return ProtocolSnapshot(
+        slug=slug,
+        date=date,
+        name=name or slug,
+        category=category,
+        top_chain=top_chain,
+        tvl=tvl,
+        risk_band=band,
+        risk_score=risk_score,
+        change_7d=change_7d,
+        change_30d=change_30d,
+        monitored=monitored,
+        captured_at=captured_at or _now(),
+    )
+
+
+class TestLatestRowsPaginated:
+    def test_returns_latest_monitored_per_slug(self, session):
+        session.add_all(
+            [
+                psnap("a", date="2026-01-01", tvl=1.0, risk_score=10),
+                psnap("a", date="2026-02-01", tvl=500.0, risk_score=80),  # latest
+                psnap("b", date="2026-02-01", tvl=300.0, risk_score=50),
+                psnap("preseed", date="2026-02-01", tvl=900.0, risk_score=99, monitored=0),
+            ]
+        )
+        session.commit()
+        rows, total = dashboard.latest_rows_paginated(session, sort="risk", direction="desc")
+        assert total == 2  # the pre-seed row is excluded from the board
+        assert [r.slug for r in rows] == ["a", "b"]  # risk 80 > 50
+        assert rows[0].tvl == 500.0  # reads the latest (2026-02-01) row, not the old one
+
+    def test_band_filter_including_unknown(self, session):
+        session.add_all(
+            [
+                psnap("low", band="low"),
+                psnap("high", band="high"),
+                psnap("nulled", band=None),
+                psnap("explicit", band="unknown"),
+            ]
+        )
+        session.commit()
+        _, total_high = dashboard.latest_rows_paginated(session, band="high")
+        assert total_high == 1
+        unk_rows, total_unk = dashboard.latest_rows_paginated(session, band="unknown")
+        assert total_unk == 2  # NULL band and the literal 'unknown' both match
+        assert {r.slug for r in unk_rows} == {"nulled", "explicit"}
+
+    def test_search_matches_name_and_slug(self, session):
+        session.add_all([psnap("aave-v3", name="Aave"), psnap("uniswap", name="Uniswap")])
+        session.commit()
+        rows, total = dashboard.latest_rows_paginated(session, q="aave")
+        assert total == 1 and rows[0].slug == "aave-v3"
+        _, total_partial = dashboard.latest_rows_paginated(session, q="swap")
+        assert total_partial == 1  # substring of the slug/name
+
+    def test_search_escapes_like_wildcards(self, session):
+        session.add_all([psnap("percent", name="100%pool"), psnap("plain", name="plain")])
+        session.commit()
+        rows, total = dashboard.latest_rows_paginated(session, q="%")
+        assert total == 1 and rows[0].slug == "percent"  # literal %, not a wildcard
+        _, total_us = dashboard.latest_rows_paginated(session, q="_")
+        assert total_us == 0  # escaped _: no row literally contains an underscore
+
+    def test_offset_limit_window(self, session):
+        session.add_all(
+            [psnap(s, risk_score=10.0 * (i + 1)) for i, s in enumerate(["a", "b", "c", "d", "e"])]
+        )
+        session.commit()
+        page1, total = dashboard.latest_rows_paginated(
+            session, sort="risk", direction="desc", offset=0, limit=2
+        )
+        assert total == 5
+        assert [r.slug for r in page1] == ["e", "d"]  # highest risk first
+        page2, _ = dashboard.latest_rows_paginated(
+            session, sort="risk", direction="desc", offset=2, limit=2
+        )
+        assert [r.slug for r in page2] == ["c", "b"]
+
+    def test_nulls_sort_to_far_end_either_direction(self, session):
+        session.add_all([psnap("scored", risk_score=5.0), psnap("unscored", risk_score=None)])
+        session.commit()
+        desc, _ = dashboard.latest_rows_paginated(session, sort="risk", direction="desc")
+        assert [r.slug for r in desc] == ["scored", "unscored"]
+        asc, _ = dashboard.latest_rows_paginated(session, sort="risk", direction="asc")
+        assert [r.slug for r in asc] == ["scored", "unscored"]  # unscored still last
+
+    def test_scope_restricts_rows_and_total(self, session):
+        session.add_all(
+            [
+                psnap("lend", category="Lending", tvl=100.0),
+                psnap("deriv", category="Derivatives", tvl=200.0),
+                psnap("nocat", category=None, tvl=300.0),
+            ]
+        )
+        session.commit()
+        rows, total = dashboard.latest_rows_paginated(
+            session, scope=Scope(categories=frozenset({"Lending"}))
+        )
+        # Derivatives is out of scope AND the NULL-category row is denied (unknown
+        # never passes a restriction) - exactly what the Python board predicate does.
+        assert total == 1 and rows[0].slug == "lend"
+
+
+class TestBoardSummary:
+    def test_aggregates_the_whole_scoped_board(self, session):
+        session.add_all(
+            [
+                psnap("hi", date="2026-02-01", tvl=300.0, band="high", change_7d=-20, name="Hi"),
+                psnap("lo", date="2026-01-31", tvl=700.0, band="low", change_7d=15, name="Lo"),
+                psnap("preseed", tvl=9999.0, band="high", monitored=0),  # excluded
+            ]
+        )
+        session.commit()
+        alert_list = [
+            Alert(
+                id="1",
+                slug="hi",
+                protocol="hi",
+                rule="tvl_drop",
+                severity="critical",
+                message="",
+                evidence={},
+                triggered_at="2026-02-01",
+            ),
+            Alert(
+                id="2",
+                slug="lo",
+                protocol="lo",
+                rule="tvl_surge",
+                severity="warning",
+                message="",
+                evidence={},
+                triggered_at="2026-02-01",
+            ),
+        ]
+        stats, as_of = dashboard.board_summary(session, alerts=alert_list)
+        assert stats.protocol_count == 2  # pre-seed excluded
+        assert stats.total_tvl == 1000
+        assert stats.by_band == {"high": 1, "low": 1}
+        assert stats.top_gainer.slug == "lo"
+        assert stats.top_loser.slug == "hi"
+        assert stats.active_critical == 1
+        assert stats.active_warning == 1
+        assert as_of == "2026-02-01"  # freshest observation date across the board
+
+    def test_summary_honors_scope(self, session):
+        session.add_all(
+            [
+                psnap("lend", category="Lending", tvl=100.0, band="low"),
+                psnap("deriv", category="Derivatives", tvl=200.0, band="high"),
+            ]
+        )
+        session.commit()
+        stats, _ = dashboard.board_summary(
+            session, scope=Scope(categories=frozenset({"Derivatives"}))
+        )
+        assert stats.protocol_count == 1
+        assert stats.total_tvl == 200
+
+
+class TestDashboardPreviewCap:
+    async def test_protocols_capped_but_stats_span_full_board(self, session, monkeypatch):
+        from app.config import get_settings
+
+        monkeypatch.setattr(get_settings(), "board_preview_size", 3)
+        session.add_all(
+            [psnap(f"p{i}", tvl=1000.0 - i, band="low", risk_score=10.0) for i in range(10)]
+        )
+        session.commit()
+        resp = await dashboard.get_dashboard(svc=None, http=None, session=session)
+        # The inline preview is capped, but the aggregate count spans the full set.
+        assert resp.stats.protocol_count == 10
+        assert len(resp.protocols) == 3
+        # Rows arrive ordered by TVL desc, so the biggest names lead the preview.
+        assert resp.protocols[0].tvl == 1000.0

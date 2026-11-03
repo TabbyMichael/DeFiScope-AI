@@ -3,6 +3,7 @@ import { Bell, Inbox } from "lucide-react";
 
 import AlertItem, { severityStyle } from "@/components/dashboard/alert-item";
 import WithheldBanner from "@/components/dashboard/withheld-banner";
+import LiveCadence from "@/components/live-cadence";
 import RunCheck from "@/components/run-check";
 import {
   Card,
@@ -175,8 +176,12 @@ export default function AlertsPage() {
             <Bell className="size-5" /> Monitoring
           </h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Rules run every 30 minutes against DefiLlama data. Every alert shows the
-            metric, observed value and threshold that triggered it.
+            Rules run every{" "}
+            <Suspense fallback="a few minutes">
+              <LiveCadence />
+            </Suspense>{" "}
+            against DefiLlama data. Every alert shows the metric, observed value
+            and threshold that triggered it.
           </p>
         </div>
         <RunCheck />

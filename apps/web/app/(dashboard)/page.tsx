@@ -3,7 +3,6 @@ import Link from "next/link";
 import { AlertTriangle } from "lucide-react";
 
 import TvlChart from "@/components/TvlChart";
-import AlertFeed from "@/components/dashboard/alert-feed";
 import ProtocolExplorer from "@/components/dashboard/protocol-explorer";
 import StatCards from "@/components/dashboard/stat-cards";
 import WatchlistBoard from "@/components/dashboard/watchlist-board";
@@ -160,10 +159,8 @@ async function DashboardContent({
           <WatchlistBoard
             protocols={data.protocols}
             stats={data.stats}
-            asOf={data.as_of}
             variant="section"
           />
-          <AlertFeed alerts={data.alerts} withheld={data.withheld_alerts} />
         </div>
       </div>
 

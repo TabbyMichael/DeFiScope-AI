@@ -341,12 +341,25 @@ if _IS_POSTGRES:
     # ceiling keeps concurrent dashboard reads from exhausting Postgres backends.
     # SQLite (dev/tests) has no such concern and keeps its single-connection
     # check_same_thread escape hatch untouched.
+    #
+    # Sizing for the fast (2-min) market-wide pass: the monitoring crawl runs
+    # ``crawl_concurrency`` (8) detail fetches concurrently, each of which opens
+    # a session to write snapshots, while dashboard/readiness requests compete
+    # for the same pool. A 5+10 ceiling could be fully checked out during a
+    # pass, so the blocking ``engine.connect()`` in the readiness probe waited
+    # the full pool_timeout (default 30s) - stalling the event loop and flipping
+    # the container unhealthy (which in turn blocks the web service's
+    # depends_on). The headroom here keeps a connection free for the probe, and
+    # the short pool_timeout means a rare burst degrades to a fast 503 instead
+    # of hanging every request. Postgres allows 100 backends and this runs a
+    # single API replica, so 10+20 stays comfortably under the ceiling.
     engine = create_engine(
         _settings.database_url,
         pool_pre_ping=True,
         pool_recycle=300,
-        pool_size=5,
-        max_overflow=10,
+        pool_size=10,
+        max_overflow=20,
+        pool_timeout=5,
     )
 else:
     engine = create_engine(
@@ -446,10 +459,28 @@ def _migrate_missing_columns() -> None:
                 # board's ``monitored == 1`` filter would silently hide. Every
                 # row predating the column was written by a monitoring pass, so
                 # backfill it as monitored.
+                #
+                # Run in a savepoint: if the UPDATE fails (e.g. stale unique
+                # index sees phantom duplicates from pre-VACUUM dead tuples)
+                # the ALTER TABLE still commits and the API can serve reads.
+                # The next monitoring pass will write monitored=1 on fresh rows.
                 if table.name == "protocol_snapshots" and col.name == "monitored":
-                    conn.execute(
-                        text("UPDATE protocol_snapshots SET monitored = 1 WHERE monitored IS NULL")
-                    )
+                    try:
+                        nested = conn.begin_nested()
+                        conn.execute(
+                            text(
+                                "UPDATE protocol_snapshots SET monitored = 1 WHERE monitored IS NULL"
+                            )
+                        )
+                        nested.commit()
+                    except Exception as exc:  # noqa: BLE001
+                        nested.rollback()
+                        logger.warning(
+                            "monitored-column backfill skipped (%s); "
+                            "existing rows will be invisible to the board "
+                            "until the next monitoring pass re-inserts them",
+                            type(exc).__name__,
+                        )
 
 
 def get_session() -> Iterator[Session]:

@@ -44,6 +44,11 @@ export type DashboardResponse = DeepRequired<Schemas["DashboardResponse"]>;
 export type ProtocolCatalogItem = DeepRequired<Schemas["ProtocolCatalogItem"]>;
 export type ProtocolCatalogPage = DeepRequired<Schemas["ProtocolCatalogPage"]>;
 export type CatalogFacets = DeepRequired<Schemas["CatalogFacets"]>;
+// Market-wide risk watchlist page (GET /api/watchlist). `items` are monitored
+// board rows; `stats`/`band_counts`/`as_of` span the whole scoped board, not
+// just this page, so the hero tiles show true market totals while the table
+// shows one server-paginated slice.
+export type WatchlistPage = DeepRequired<Schemas["WatchlistPageResponse"]>;
 export type ChatCitation = DeepRequired<Schemas["ChatCitation"]>;
 export type ChatAnswer = DeepRequired<Schemas["ChatAnswer"]>;
 

@@ -71,3 +71,40 @@ export function fmtPct(value: number | null | undefined, digits = 1): string {
   if (value == null) return "n/a";
   return `${value >= 0 ? "+" : ""}${value.toFixed(digits)}%`;
 }
+
+/**
+ * Query for the paginated market-wide watchlist (`GET /api/watchlist`).
+ *
+ * Lives here (not in `lib/api`) because the watchlist board is a *client*
+ * component that builds these query strings to drive URL navigation, and
+ * `lib/api` depends on `next/headers` (server-only) - importing it into the
+ * browser bundle breaks the production build. Pure + client-safe belongs here.
+ */
+export interface WatchlistQuery {
+  page?: number;
+  size?: 50 | 100 | 200;
+  sort?: "risk" | "tvl" | "7d" | "30d";
+  dir?: "asc" | "desc";
+  band?: string;
+  q?: string;
+}
+
+/**
+ * Build the watchlist query string, forwarding only the params that are set.
+ *
+ * An allowlisted convenience boundary (page/size/sort/dir/band/q) - the backend
+ * re-validates every value as a closed set, so this is not the security gate,
+ * just a clean way to skip unset params.
+ */
+export function watchlistQuerystring(query: WatchlistQuery): string {
+  const params = new URLSearchParams();
+  if (query.page && query.page > 1) params.set("page", String(query.page));
+  if (query.size) params.set("size", String(query.size));
+  if (query.sort) params.set("sort", query.sort);
+  if (query.dir) params.set("dir", query.dir);
+  if (query.band) params.set("band", query.band);
+  const q = query.q?.trim();
+  if (q) params.set("q", q);
+  const s = params.toString();
+  return s ? `?${s}` : "";
+}

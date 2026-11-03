@@ -52,6 +52,31 @@ services:
       # run fully uncached without removing the redis service.
       DEFISCOPE_REDIS_URL: ${DEFISCOPE_REDIS_URL:-redis://redis:6379/0}
       DEFISCOPE_DEFAULT_PROTOCOLS: aave-v3,uniswap-v3,lido,curve-dex,compound-v3
+      # Market-wide risk watchlist. The board/alerts cover the top N protocols by
+      # TVL (after category/slug exclusions); the crawl is spread across passes
+      # via the refresh batch so one tick stays inside the interval. Override in
+      # .env to shrink the demo footprint (e.g. DEFISCOPE_MARKET_TOP_N=200).
+      DEFISCOPE_MARKET_TOP_N: ${DEFISCOPE_MARKET_TOP_N:-5000}
+      DEFISCOPE_MONITOR_REFRESH_BATCH_SIZE: ${DEFISCOPE_MONITOR_REFRESH_BATCH_SIZE:-600}
+      DEFISCOPE_MONITOR_ALWAYS_CURATED: ${DEFISCOPE_MONITOR_ALWAYS_CURATED:-true}
+      DEFISCOPE_MONITOR_INTERVAL_MINUTES: ${DEFISCOPE_MONITOR_INTERVAL_MINUTES:-2}
+      DEFISCOPE_BOARD_PREVIEW_SIZE: ${DEFISCOPE_BOARD_PREVIEW_SIZE:-120}
+      # Enrichment master switches. When a provider host is unreachable or
+      # rate-limiting (e.g. fees.llama.fi DNS-blocked), a market-wide crawl
+      # spends its time in retry/backoff on those calls and starves the request
+      # loop, flipping readiness unhealthy. Flip these to false in .env to
+      # degrade to TVL-only (the feature's documented escape hatch). Defaults
+      # keep full enrichment.
+      DEFISCOPE_ECONOMIC_DATA_ENABLED: ${DEFISCOPE_ECONOMIC_DATA_ENABLED:-true}
+      DEFISCOPE_STABLECOIN_DATA_ENABLED: ${DEFISCOPE_STABLECOIN_DATA_ENABLED:-true}
+      # Bound the cold-start pre-seed storm: `false` seeds only the top TVL slice
+      # (above preseed_min_tvl) instead of backfilling the whole market tail on
+      # boot, so a first board is useful fast without a many-minute crawl. With
+      # the 2-min cadence a full-market backfill on boot overlaps the first
+      # scheduled passes and starves the DB pool (readiness -> unhealthy -> web
+      # blocked), so the bounded cold start is the default here. Override to
+      # true in .env to backfill the entire tail up front.
+      DEFISCOPE_PRESEED_BACKFILL_REST: ${DEFISCOPE_PRESEED_BACKFILL_REST:-false}
       # Second data provider (on-chain activity). Both default to empty, which is
       # a supported state: the API then reports `unconfigured` for every protocol
       # and spends no Dune credits. Set them in .env to switch it on.
@@ -94,12 +119,19 @@ services:
     ports:
       - "3646:8000"
     # Image defines a HEALTHCHECK on /api/health/ready; wait for it to pass.
+    # The readiness probe opens a pooled DB connection (SELECT 1). On a cold
+    # start the app immediately fires the warm-up / pre-seed / catalog / ingest
+    # background tasks, which saturate the pool with slow DefiLlama fetches and
+    # bulk snapshot writes - so the probe can briefly fail to obtain a
+    # connection. Give a generous start_period (the pre-seed storm observed on a
+    # cold volume runs >130s) and more retries so a transient pool-contention
+    # blip never flips the container unhealthy and stalls the web dependency.
     healthcheck:
-      test: ["CMD", "python", "-c", "import sys,urllib.request as u; sys.exit(0 if u.urlopen('http://127.0.0.1:8000/api/health/ready', timeout=3).status==200 else 1)"]
-      interval: 30s
-      timeout: 5s
-      start_period: 20s
-      retries: 3
+      test: ["CMD", "python", "-c", "import sys,urllib.request as u; sys.exit(0 if u.urlopen('http://127.0.0.1:8000/api/health/ready', timeout=8).status==200 else 1)"]
+      interval: 15s
+      timeout: 10s
+      start_period: 180s
+      retries: 5
     depends_on:
       db:
         condition: service_healthy

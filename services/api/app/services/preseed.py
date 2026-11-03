@@ -46,18 +46,29 @@ logger = logging.getLogger(__name__)
 def unseeded_slugs(session: Session, limit: int, min_tvl: float = 0.0) -> list[str]:
     """Catalog slugs with no snapshot row yet, biggest first.
 
-    An anti-join (``NOT IN`` the snapshot slugs, indexed by ``ix_snapshot_slug_date``
-    leading with slug) rather than a correlated EXISTS - at a few thousand rows
-    either plan is cheap, and this one reads plainly. Rows with a NULL TVL are
-    skipped: a protocol DefiLlama does not even list a TVL for is not who the
-    seed loop is for. ``min_tvl`` is the floor for the steady-state loop; the
+    Correlated ``NOT EXISTS`` (anti-join), deliberately NOT ``NOT IN``. The
+    snapshot table holds every protocol's full daily history (~3.7M rows and
+    growing), and the planner expands ``slug NOT IN (SELECT slug ...)`` into a
+    per-row SubPlan that materializes a *sequential scan of the whole table* -
+    O(catalog x snapshots), with JIT on top. Measured on this deployment that
+    query ran for minutes, pinned Postgres at 100% CPU, and - because it runs on
+    the single shared event loop - stalled every other request (readiness
+    included), leaving the API unhealthy and the web service blocked behind its
+    ``depends_on``. ``NOT EXISTS`` instead becomes a Nested Loop Anti Join backed
+    by an Index-Only Scan on ``ix_protocol_snapshots_slug`` (EXPLAIN cost ~249 vs
+    ~13.4M for the ``NOT IN`` form). ``ProtocolSnapshot.slug`` is NOT NULL, so
+    the two forms return identical rows - only the plan differs. Rows with a NULL
+    TVL are skipped: a protocol DefiLlama does not even list a TVL for is not who
+    the seed loop is for. ``min_tvl`` is the floor for the steady-state loop; the
     initial drain lowers it to sweep the tail once the big names are in.
     """
-    seeded = select(ProtocolSnapshot.slug).scalar_subquery()
+    already_seeded = (
+        select(1).where(ProtocolSnapshot.slug == ProtocolCatalog.slug).exists()
+    )
     stmt = (
         select(ProtocolCatalog.slug)
         .where(ProtocolCatalog.tvl.isnot(None), ProtocolCatalog.tvl >= min_tvl)
-        .where(ProtocolCatalog.slug.not_in(seeded))
+        .where(~already_seeded)
         .order_by(ProtocolCatalog.tvl.desc(), ProtocolCatalog.slug)
         .limit(limit)
     )

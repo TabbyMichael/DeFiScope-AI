@@ -89,10 +89,10 @@ DeFiScope-AI/
 │   │   ├── db.py                  # SQLAlchemy models; SQLite default, Postgres + pgvector
 │   │   ├── reference_data.py      # curated protocol→stablecoin map (data/*.json)
 │   │   ├── config.py              # pydantic-settings (DEFISCOPE_ env prefix)
-│   │   └── main.py                # lifespan, CORS, scheduler (30-min pass), health/readiness
+│   │   └── main.py                # lifespan, CORS, scheduler (15-min pass), health/readiness
 │   ├── alembic/                    # migrations (schema source of truth)
 │   ├── data/protocol_stablecoins.json
-│   └── tests/                      # 229 pytest: metrics, scoring, clients, alerts, dashboard,
+│   └── tests/                      # 353 pytest: metrics, scoring, clients, alerts, dashboard,
 │                                   #   watchlist, export, notifiers, RAG (ingest + service), API, policy,
 │                                   #   auth, scope (respx, no live network)
 ├── services/db/                    # Postgres 16 + pgvector, built on Alpine (not the Debian
@@ -135,10 +135,18 @@ DeFiScope-AI/
                           notifiers/  (console/webhook/slack/discord/telegram/email)
 ```
 
-The scheduler (`main.py`) drives a **30-minute monitoring pass**: discover the
-watchlist (curated slugs + top-N by TVL), fetch packs concurrently, evaluate
-rules, persist daily snapshots + alerts, and fan new alerts out to configured
-channels. The same pass runs once at startup as a **background task** (never
+The scheduler (`main.py`) drives a **~2-minute monitoring pass**
+(`DEFISCOPE_MONITOR_INTERVAL_MINUTES`, default 2): discover the market-wide
+watchlist (curated slugs + top-N by TVL, `DEFISCOPE_MARKET_TOP_N`, default
+5,000), then refresh a **bounded round-robin slice** of it each pass — the
+curated core + last pass's movers always (`monitor_always_curated`), the rest
+ordered never-seen-by-TVl-desc first then stalest `captured_at` first, capped at
+`DEFISCOPE_MONITOR_REFRESH_BATCH_SIZE` (default 600) — so a full sweep of
+thousands drains across passes instead of one tick overrunning the interval,
+hammering DefiLlama or saturating the DB pool (the readiness/unhealthy crash
+loop). The slice is fetched concurrently, rules are evaluated, daily snapshots
++ alerts persisted, and new alerts fanned out to configured channels. The same
+pass runs once at startup as a **background task** (never
 awaited in the lifespan, so a slow crawl can't delay the port bind or fail
 readiness). The RAG index is hydrated synchronously from any persisted chunks
 (offline-capable from the first request) and refreshed in the background after
@@ -150,10 +158,13 @@ warm-up, because the evidence chunks are derived from the snapshots/alerts.
  service start ──> background pass (NOT awaited in lifespan —
                    a slow crawl can't delay the port bind)
         |
- every 30 min (APScheduler, in-process) <──+
+ every ~2 min  (APScheduler, in-process) <──+
         |                                  |
         v                                  |
- discover watchlist (curated slugs + top-N by TVL)
+ discover watchlist (curated slugs + top-N by TVL);
+ pick a bounded round-robin slice (curated + last movers
+ always; rest never-seen by TVL desc, then stalest
+ captured_at first; capped at the refresh batch size)
         |
         v
  fetch packs concurrently (bounded, LRU TTL 5-min,
@@ -345,7 +356,7 @@ graph TB
   handler. Opening a protocol page therefore cannot spend credits or wait on a
   SQL queue.
 - `load(session, slug)` reads persisted rows and nothing else. `get_pack()` uses
-  this, which is what keeps the 50-protocol dashboard free of both an N+1 query
+  this, which is what keeps the market-wide board free of both an N+1 query
   and a Dune round trip.
 
 The pack's `onchain` block is rebuilt from the DB even on a **cache hit**, because
