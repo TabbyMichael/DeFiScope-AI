@@ -1,6 +1,7 @@
 import { cookies } from "next/headers";
 
 import { SESSION_COOKIE } from "./auth";
+import { watchlistQuerystring, type WatchlistQuery } from "./api-config";
 import type {
   Alert,
   CatalogFacets,
@@ -12,6 +13,7 @@ import type {
   ResearchBrief,
   RiskPoint,
   TvlPoint,
+  WatchlistPage,
 } from "./types";
 
 // Client-safe constants and formatters live in ./api-config so browser
@@ -23,6 +25,8 @@ export {
   fmtUsd,
   resolveApiPublicUrl,
   resolveApiWsUrl,
+  watchlistQuerystring,
+  type WatchlistQuery,
 } from "./api-config";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
@@ -319,12 +323,20 @@ export function catalogQuerystring(query: CatalogQuery): string {
   return s ? `?${s}` : "";
 }
 
+// WatchlistQuery + watchlistQuerystring now live in ./api-config (client-safe)
+// and are re-exported above, so the client watchlist board can import them
+// without dragging this server module's `next/headers` dependency into the
+// browser bundle (which breaks the production build).
+
 export const api = {
   // Cold hydration may run a live DefiLlama crawl; give it a generous budget.
   dashboard: () => get<DashboardResponse>("/api/dashboard", 120, 60_000),
   // Discovery catalog: one page, filtered/sorted/served entirely server-side.
   protocols: (query: CatalogQuery = {}) =>
     get<ProtocolCatalogPage>(`/api/protocols${catalogQuerystring(query)}`, 120, 60_000),
+  // Market-wide risk watchlist: one server-paginated page over ~5000 rows.
+  watchlist: (query: WatchlistQuery = {}) =>
+    get<WatchlistPage>(`/api/watchlist${watchlistQuerystring(query)}`, 60, 60_000),
   protocolFacets: () => get<CatalogFacets>("/api/protocols/facets", 300, 60_000),
   protocol: (slug: string) =>
     get<ProtocolResearch>(`/api/protocols/${encodeURIComponent(slug)}`),

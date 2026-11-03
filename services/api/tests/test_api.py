@@ -110,11 +110,7 @@ async def test_preseed_re_persist_never_demotes_a_watchlist_row(api_client):
 
         alert_engine.persist_snapshots(sess, [pack], monitored=0)
 
-        row = (
-            sess.query(ProtocolSnapshot)
-            .filter_by(slug="test-protocol", date=date)
-            .first()
-        )
+        row = sess.query(ProtocolSnapshot).filter_by(slug="test-protocol", date=date).first()
         assert row is not None
         assert row.monitored == 1  # never demoted by the detail pass
     finally:
@@ -344,3 +340,94 @@ class TestAlertsEndpoints:
         assert len(rows) == 1
         assert rows[0]["id"] == "alert-run"
         assert rows[0]["severity"] == "critical"
+
+
+def _watch_seed(
+    slug,
+    date,
+    tvl,
+    *,
+    name=None,
+    band=None,
+    risk=None,
+    change_7d=None,
+    monitored=1,
+):
+    """A fresh-captured board row for the pure-read watchlist endpoint."""
+    return ProtocolSnapshot(
+        slug=slug,
+        date=date,
+        name=name or slug,
+        category="Lending",
+        top_chain="Ethereum",
+        tvl=tvl,
+        risk_band=band,
+        risk_score=risk,
+        change_7d=change_7d,
+        monitored=monitored,
+        captured_at=datetime.now(UTC),
+    )
+
+
+class TestWatchlistEndpoint:
+    async def test_sort_and_pagination_wiring(self, api_client):
+        Base.metadata.create_all(engine)
+        sess = SessionLocal()
+        try:
+            sess.query(ProtocolSnapshot).filter(ProtocolSnapshot.slug.like("zwl-%")).delete()
+            for i in range(5):
+                sess.add(
+                    _watch_seed(
+                        f"zwl-{i}",
+                        "2026-02-01",
+                        100.0 * (5 - i),
+                        name=f"zwl proto {i}",
+                        band="low",
+                        risk=10.0 * i,
+                    )
+                )
+            sess.commit()
+        finally:
+            sess.close()
+
+        # ``q=zwl`` isolates these rows from any leftovers in the shared test DB,
+        # so ``total`` and the ordered ``items`` are deterministic.
+        body = (await api_client.get("/api/watchlist?sort=risk&dir=desc&q=zwl")).json()
+        assert body["total"] == 5
+        assert body["page"] == 1 and body["pages"] == 1
+        assert body["sort"] == "risk" and body["dir"] == "desc"
+        assert [it["slug"] for it in body["items"]] == ["zwl-4", "zwl-3", "zwl-2", "zwl-1", "zwl-0"]
+
+        # A page past the end is honestly empty, but ``total`` is unchanged.
+        p2 = (await api_client.get("/api/watchlist?sort=risk&dir=desc&q=zwl&page=2")).json()
+        assert p2["items"] == [] and p2["total"] == 5
+
+    async def test_band_and_search_filter_server_side(self, api_client):
+        Base.metadata.create_all(engine)
+        sess = SessionLocal()
+        try:
+            sess.query(ProtocolSnapshot).filter(ProtocolSnapshot.slug.like("zwb-%")).delete()
+            sess.add(
+                _watch_seed("zwb-aave", "2026-02-01", 10.0, name="zwb Aave", band="high", risk=90)
+            )
+            sess.add(
+                _watch_seed("zwb-uni", "2026-02-01", 10.0, name="zwb Uniswap", band="low", risk=5)
+            )
+            sess.commit()
+        finally:
+            sess.close()
+
+        band = (await api_client.get("/api/watchlist?band=high&q=zwb")).json()
+        assert [it["slug"] for it in band["items"]] == ["zwb-aave"]
+        assert band["band"] == "high"
+
+        search = (await api_client.get("/api/watchlist?q=zwb%20uniswap")).json()
+        assert [it["slug"] for it in search["items"]] == ["zwb-uni"]
+
+    async def test_invalid_params_are_rejected(self, api_client):
+        # Page size / sort / dir are closed sets enforced by the schema enums,
+        # and page has a lower bound of 1 - a bad URL never reaches the query.
+        assert (await api_client.get("/api/watchlist?size=77")).status_code == 422
+        assert (await api_client.get("/api/watchlist?sort=nope")).status_code == 422
+        assert (await api_client.get("/api/watchlist?dir=sideways")).status_code == 422
+        assert (await api_client.get("/api/watchlist?page=0")).status_code == 422

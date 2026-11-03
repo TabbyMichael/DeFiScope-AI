@@ -35,7 +35,14 @@ from app.services import onchain as onchain_service
 
 logger = logging.getLogger(__name__)
 
-CACHE_TTL_SECONDS = 300  # DefiLlama TVL is updated hourly; 5 min cache is ample
+# Ceiling for the in-process research cache. It protects *interactive* reads
+# (dashboard refreshes, brief generation) from hammering the public DefiLlama
+# API, so we never want a live click to re-fetch on every request. The EFFECTIVE
+# TTL per service instance is this ceiling clamped to just under the scheduler
+# interval (see ``ProtocolResearchService._cache_ttl_seconds``), so a scheduled
+# monitoring pass always fetches fresh data while a faster-cadence interactive
+# burst still gets some reuse.
+CACHE_TTL_SECONDS = 300
 
 
 @dataclass
@@ -85,6 +92,13 @@ class ProtocolResearchService:
         self._cache: dict[str, tuple[float, ResearchPack]] = {}
         self._cache_max = max(1, self.settings.research_cache_max_entries)
         self._list_cache: tuple[float, dict[str, ProtocolSummary]] | None = None
+        # Effective cache lifetime, clamped to sit just BELOW the scheduler
+        # interval so every monitoring pass fetches fresh upstream data rather
+        # than re-scoring the previous tick's pack. Never exceeds the interactive
+        # ceiling, and keeps a 15s floor so a pathological sub-minute interval
+        # cannot force a re-fetch storm.
+        interval_seconds = max(1, self.settings.monitor_interval_minutes * 60)
+        self._cache_ttl_seconds = max(15, min(CACHE_TTL_SECONDS, interval_seconds - 20))
 
     def _remember(self, slug: str, pack: ResearchPack, captured_at: float) -> None:
         """Store a pack and evict oldest entries beyond the configured cap.
@@ -98,6 +112,11 @@ class ProtocolResearchService:
 
     async def _protocol_index(self, http: httpx.AsyncClient) -> dict[str, ProtocolSummary]:
         now = time.monotonic()
+        # The whole-directory listing churns slowly (top-N-by-TVL membership) and
+        # is comparatively expensive, so it keeps the full ceiling rather than the
+        # interval-clamped TTL used for per-protocol packs. Discovery of a brand-
+        # new #1 protocol lagging a few minutes is acceptable; per-slug alert
+        # freshness is not.
         if self._list_cache and now - self._list_cache[0] < CACHE_TTL_SECONDS:
             return self._list_cache[1]
         summaries = await self.client.list_protocols(http)
@@ -148,13 +167,13 @@ class ProtocolResearchService:
     ) -> ResearchPack:
         now = time.monotonic()
         cached = self._cache.get(slug)
-        if not refresh and cached is not None and now - cached[0] < CACHE_TTL_SECONDS:
+        if not refresh and cached is not None and now - cached[0] < self._cache_ttl_seconds:
             pack = cached[1]
             # On-chain activity is read from the DB, so keeping a cached pack's
             # block current costs one indexed query and no HTTP. That matters
             # because the HTTP cache and the observation table age at different
-            # rates (5 minutes vs a day), and a stale number here would be the
-            # one thing this block exists not to be.
+            # rates (the interval-clamped TTL vs a day), and a stale number here
+            # would be the one thing this block exists not to be.
             if session is not None:
                 pack.onchain = onchain_service.load(session, slug, self.settings)
             return pack

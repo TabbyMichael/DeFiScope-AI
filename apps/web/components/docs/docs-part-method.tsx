@@ -67,7 +67,7 @@ function Architecture() {
         <Code>{"main.py"}</Code>
         {", which runs a pass every "}
         <Code>{"monitor_interval_minutes"}</Code>
-        {" (30 by default)."}
+        {" (15 by default)."}
       </P>
       <ol className="ds-steps">
         {PIPELINE.map((step, i) => (

@@ -4,23 +4,56 @@ import { AlertTriangle, ShieldAlert } from "lucide-react";
 
 import WatchlistBoard from "@/components/dashboard/watchlist-board";
 import { Skeleton } from "@/components/ui/skeleton";
-import { api } from "@/lib/api";
-import type { DashboardResponse } from "@/lib/types";
+import { api, type WatchlistQuery } from "@/lib/api";
+import type { WatchlistPage } from "@/lib/types";
 
 export const metadata = {
   title: "Risk Watchlist · DeFiScope AI",
   description:
-    "The full ranked watchlist of tracked protocols: search, filter by risk band, and sort by risk, TVL or trend.",
+    "The full market-wide risk watchlist: every monitored protocol, server-paginated and searchable, ranked by risk, TVL or trend.",
 };
 
-// Same monitored-board payload the Overview stats read (`/api/dashboard`): the
-// watchlist is a full-screen view of `data.protocols`, so no extra endpoint is
-// needed and both surfaces can never disagree about who is tracked or scored.
-async function WatchlistContent() {
-  let data: DashboardResponse | null = null;
+// Coerce a raw search-param value into a member of a closed set, else fallback.
+function pick<T extends string>(raw: string | string[] | undefined, allowed: readonly T[], fallback: T): T {
+  const v = Array.isArray(raw) ? raw[0] : raw;
+  return v && (allowed as readonly string[]).includes(v) ? (v as T) : fallback;
+}
+
+function pickSize(raw: string | string[] | undefined): 50 | 100 | 200 {
+  const v = Array.isArray(raw) ? raw[0] : raw;
+  const n = v ? Number.parseInt(v, 10) : NaN;
+  return n === 50 || n === 100 || n === 200 ? n : 100;
+}
+
+function pickPage(raw: string | string[] | undefined): number {
+  const v = Array.isArray(raw) ? raw[0] : raw;
+  const n = v ? Number.parseInt(v, 10) : NaN;
+  return Number.isFinite(n) && n >= 1 ? n : 1;
+}
+
+// The board reads ONE server-paginated slice of the full market (GET
+// /api/watchlist) driven entirely by the URL: the server sorts/filters/searches
+// and pages in SQL, and returns the market-wide summary for the hero/tiles, so
+// the page never fetches all ~5000 rows to the browser.
+async function WatchlistContent({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
+  const sp = await searchParams;
+  const query: WatchlistQuery = {
+    page: pickPage(sp.page),
+    size: pickSize(sp.size),
+    sort: pick(sp.sort, ["risk", "tvl", "7d", "30d"] as const, "risk"),
+    dir: pick(sp.dir, ["asc", "desc"] as const, "desc"),
+    band: (Array.isArray(sp.band) ? sp.band[0] : sp.band) || undefined,
+    q: (Array.isArray(sp.q) ? sp.q[0] : sp.q) || undefined,
+  };
+
+  let data: WatchlistPage | null = null;
   let error: string | null = null;
   try {
-    data = await api.dashboard();
+    data = await api.watchlist(query);
   } catch (e) {
     error = e instanceof Error ? e.message : String(e);
   }
@@ -43,14 +76,7 @@ async function WatchlistContent() {
     );
   }
 
-  return (
-    <WatchlistBoard
-      protocols={data.protocols}
-      stats={data.stats}
-      asOf={data.as_of}
-      variant="page"
-    />
-  );
+  return <WatchlistBoard data={data} stats={data.stats} variant="page" />;
 }
 
 function WatchlistFallback() {
@@ -70,7 +96,11 @@ function WatchlistFallback() {
   );
 }
 
-export default function WatchlistPage() {
+export default function WatchlistPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
   return (
     <div className="space-y-6">
       <header className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
@@ -79,9 +109,10 @@ export default function WatchlistPage() {
             <ShieldAlert className="size-5" /> Risk watchlist
           </h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Every monitored protocol, ranked by composite risk. Sort by risk,
-            TVL or trend and filter by band. An unscored protocol is a data
-            gap, never a claim that it is safe.
+            Every monitored protocol across the market, ranked by composite
+            risk. Sort by risk, TVL or trend and filter by band - server-
+            paginated, so the full watchlist stays fast. An unscored protocol
+            is a data gap, never a claim that it is safe.
           </p>
         </div>
         <Link
@@ -92,7 +123,7 @@ export default function WatchlistPage() {
         </Link>
       </header>
       <Suspense fallback={<WatchlistFallback />}>
-        <WatchlistContent />
+        <WatchlistContent searchParams={searchParams} />
       </Suspense>
     </div>
   );

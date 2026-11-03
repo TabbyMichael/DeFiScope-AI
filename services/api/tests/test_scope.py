@@ -204,3 +204,23 @@ class TestMonitorGate:
         assert detail["policy"].startswith("monitor.run.")
         assert detail["policy"] in {"monitor.run.freshness", "monitor.run.business_hours"}
         assert detail["reason"]
+
+
+class TestWatchlistScope:
+    """The paginated board must narrow in SQL, so ``total`` and the page reflect
+    only what the caller may open - a scoped analyst cannot count or read rows
+    out of scope by crafting a URL."""
+
+    async def test_analyst_watchlist_excludes_out_of_scope_rows(
+        self, scoped_board, analyst_client, admin_client
+    ):
+        # ``q=scope`` isolates the three scoped_board rows from any leftovers, so
+        # the totals below are exact regardless of the shared test DB.
+        analyst = (await analyst_client.get("/api/watchlist?q=scope")).json()
+        admin = (await admin_client.get("/api/watchlist?q=scope")).json()
+
+        assert {it["slug"] for it in analyst["items"]} == {"scope-lending-eth", "scope-lending-sol"}
+        assert "scope-deriv-eth" in {it["slug"] for it in admin["items"]}
+        # The Derivatives row is invisible to the analyst, in the page AND the count.
+        assert admin["total"] == 3
+        assert analyst["total"] == 2

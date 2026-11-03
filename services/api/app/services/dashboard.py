@@ -17,7 +17,7 @@ import asyncio
 from collections import defaultdict
 from datetime import UTC, date, datetime, timedelta
 
-from sqlalchemy import and_, func
+from sqlalchemy import and_, func, or_
 from sqlalchemy.orm import Session
 
 from app.db import ProtocolSnapshot
@@ -33,7 +33,7 @@ from app.schemas import (
 from app.security.principal import ANONYMOUS, Scope, Subject
 
 # If the newest capture is older than this, treat the board as stale and run a
-# live hydration pass. The scheduler captures every 30 min, so this only
+# live hydration pass. The scheduler captures every few minutes, so this only
 # triggers when the service has been down / freshly (re)started.
 STALE_AFTER = timedelta(hours=6)
 
@@ -133,6 +133,191 @@ def latest_rows(session: Session, scope: Scope | None = None) -> list[ProtocolSn
         if r.slug not in by_slug:
             by_slug[r.slug] = r
     return _scope_rows(list(by_slug.values()), scope)
+
+
+def _latest_monitored_subquery(session: Session):
+    """The max(date) group-by-per-slug subquery every board read funnels
+    through. Pre-seed rows (``monitored = 0``) are excluded here - the single
+    board-integrity guard - and ``coalesce`` keeps legacy NULL rows in the board."""
+    return (
+        session.query(
+            ProtocolSnapshot.slug,
+            func.max(ProtocolSnapshot.date).label("max_date"),
+        )
+        .filter(func.coalesce(ProtocolSnapshot.monitored, 1) != 0)
+        .group_by(ProtocolSnapshot.slug)
+        .subquery()
+    )
+
+
+def _escape_like(term: str) -> str:
+    """Neutralize LIKE wildcards so a search term is matched literally."""
+    return term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
+def _apply_scope_sql(query, scope: Scope | None):
+    """Narrow a ProtocolSnapshot query to the subject's data scope in SQL.
+
+    Mirrors ``_scope_rows``' deny-unknown rule: a category/chain restriction
+    uses ``IN``, which drops NULL-attribute rows - exactly what ``Scope.allows``
+    does in Python - so a paginated read cannot leak a row the board would hide.
+    Applying it in SQL (not post-fetch) is what lets ``total`` and the page
+    window reflect only what the caller may see over the full ~5000-row board."""
+    if scope is None or not scope.restricted:
+        return query
+    if scope.categories is not None:
+        query = query.filter(ProtocolSnapshot.category.in_(tuple(scope.categories)))
+    if scope.chains is not None:
+        query = query.filter(ProtocolSnapshot.top_chain.in_(tuple(scope.chains)))
+    return query
+
+
+# Board sort allowlist: watchlist key -> the snapshot column to order by. The
+# router constrains ``sort`` to this set via an enum, so a caller string never
+# reaches SQL as text - it is only ever a lookup into one of these columns.
+BOARD_SORT_COLUMNS: dict[str, object] = {
+    "risk": ProtocolSnapshot.risk_score,
+    "tvl": ProtocolSnapshot.tvl,
+    "7d": ProtocolSnapshot.change_7d,
+    "30d": ProtocolSnapshot.change_30d,
+}
+
+
+def latest_rows_paginated(
+    session: Session,
+    *,
+    sort: str = "risk",
+    direction: str = "desc",
+    band: str | None = None,
+    q: str | None = None,
+    offset: int = 0,
+    limit: int = 100,
+    scope: Scope | None = None,
+) -> tuple[list[ProtocolSnapshot], int]:
+    """One page of the board's latest monitored rows, plus the filtered total.
+
+    Everything - band filter, name/slug search, scope, ordering and paging -
+    happens in SQL, so a 5000-protocol watchlist never serializes the whole set
+    to the browser or loads 5000 ORM objects to slice one page client-side. The
+    ``uq_snapshot_slug_date`` constraint guarantees one row per (slug, date), so
+    the join on (slug, max_date) yields exactly one row per slug - no post-fetch
+    de-dup is needed (unlike the whole-board ``latest_rows`` safety net)."""
+    sub = _latest_monitored_subquery(session)
+    query = (
+        session.query(ProtocolSnapshot)
+        .join(
+            sub,
+            and_(
+                ProtocolSnapshot.slug == sub.c.slug,
+                ProtocolSnapshot.date == sub.c.max_date,
+            ),
+        )
+        .filter(func.coalesce(ProtocolSnapshot.monitored, 1) != 0)
+    )
+    query = _apply_scope_sql(query, scope)
+
+    if band:
+        if band == "unknown":
+            query = query.filter(
+                or_(
+                    ProtocolSnapshot.risk_band.is_(None),
+                    ProtocolSnapshot.risk_band == "unknown",
+                )
+            )
+        else:
+            query = query.filter(ProtocolSnapshot.risk_band == band)
+
+    term = (q or "").strip()
+    if term:
+        like = f"%{_escape_like(term)}%"
+        query = query.filter(
+            or_(
+                ProtocolSnapshot.name.ilike(like, escape="\\"),
+                ProtocolSnapshot.slug.ilike(like, escape="\\"),
+            )
+        )
+
+    total = query.count()
+    column = BOARD_SORT_COLUMNS.get(sort, ProtocolSnapshot.risk_score)
+    # Nulls always sort to the far end so "riskiest first" / "biggest TVL" never
+    # bury the scored rows under the unscored tail, whichever direction asked.
+    order_terms = [
+        column.is_(None).asc(),
+        column.desc() if direction == "desc" else column.asc(),
+        ProtocolSnapshot.slug.asc(),  # stable tiebreak for equal values
+    ]
+    rows = query.order_by(*order_terms).offset(max(0, offset)).limit(max(0, limit)).all()
+    return rows, total
+
+
+def board_summary(
+    session: Session, *, scope: Scope | None = None, alerts: list[Alert] | None = None
+) -> tuple[DashboardStats, str | None]:
+    """Aggregate the *whole* scoped board in one lightweight column scan.
+
+    The watchlist page shows market-wide totals (protocol count, total TVL, band
+    tiles, top movers, as-of) that must span every monitored protocol - not just
+    the current page or the active band/search filter, which is what
+    ``latest_rows_paginated`` returns. Reading bare columns (not ORM entities)
+    keeps a 5000-row scan cheap. ``alerts`` only feeds the two active-alert
+    counters; pass ``None`` when the caller adds them separately."""
+    sub = _latest_monitored_subquery(session)
+    query = (
+        session.query(
+            ProtocolSnapshot.slug,
+            ProtocolSnapshot.risk_band,
+            ProtocolSnapshot.tvl,
+            ProtocolSnapshot.change_7d,
+            ProtocolSnapshot.name,
+            ProtocolSnapshot.date,
+        )
+        .join(
+            sub,
+            and_(
+                ProtocolSnapshot.slug == sub.c.slug,
+                ProtocolSnapshot.date == sub.c.max_date,
+            ),
+        )
+        .filter(func.coalesce(ProtocolSnapshot.monitored, 1) != 0)
+    )
+    query = _apply_scope_sql(query, scope)
+
+    total_tvl = 0.0
+    count = 0
+    by_band: dict[str, int] = {}
+    as_of: str | None = None
+    gainer: tuple[str, str, float] | None = None
+    loser: tuple[str, str, float] | None = None
+    for slug, band, tvl, chg_7d, name, d in query.all():
+        count += 1
+        if tvl is not None:
+            total_tvl += tvl
+        key = band or "unknown"
+        by_band[key] = by_band.get(key, 0) + 1
+        if d is not None and (as_of is None or d > as_of):
+            as_of = d
+        if chg_7d is not None:
+            label = name or slug
+            if gainer is None or chg_7d > gainer[2]:
+                gainer = (slug, label, chg_7d)
+            if loser is None or chg_7d < loser[2]:
+                loser = (slug, label, chg_7d)
+
+    alerts = alerts or []
+    stats = DashboardStats(
+        total_tvl=round(total_tvl, 2),
+        protocol_count=count,
+        by_band=by_band,
+        active_critical=sum(1 for a in alerts if a.severity == "critical"),
+        active_warning=sum(1 for a in alerts if a.severity == "warning"),
+        top_gainer=Mover(slug=gainer[0], name=gainer[1], change_7d=round(gainer[2], 2))
+        if gainer
+        else None,
+        top_loser=Mover(slug=loser[0], name=loser[1], change_7d=round(loser[2], 2))
+        if loser
+        else None,
+    )
+    return stats, as_of
 
 
 def latest_row_for(session: Session, slug: str) -> ProtocolSnapshot | None:
@@ -341,6 +526,15 @@ async def get_dashboard(
     alerts, withheld = alert_engine.today_alerts_for(session, subject, visible_slugs=visible_slugs)
 
     protocols = [row_to_overview(r) for r in rows]
+    # The Overview embeds a *compact* board preview, not the whole market: the
+    # aggregate stats above span every monitored row, but the inline protocol
+    # list is capped (rows arrive ordered by TVL, so the biggest names lead) and
+    # sparklines are fetched only for that preview. The full market is paged via
+    # GET /api/watchlist, so the landing payload stays small at 5000 protocols.
+    from app.config import get_settings
+
+    preview_size = max(0, get_settings().board_preview_size)
+    protocols = protocols[:preview_size]
     series = sparklines(session, [p.slug for p in protocols], SPARKLINE_DAYS)
     for p in protocols:
         p.sparkline = series.get(p.slug, [])

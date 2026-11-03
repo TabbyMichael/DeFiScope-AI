@@ -12,7 +12,6 @@ const AUTO_REFRESH_MS = 60_000;
 export default function RunCheck() {
   const router = useRouter();
   const [running, setRunning] = useState(false);
-  const [auto, setAuto] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   // A 403 from FastAPI here is the feature, not a bug: "the snapshot is fresh,
   // a crawl would be redundant" is an explanation we want to show verbatim.
@@ -56,11 +55,12 @@ export default function RunCheck() {
     }
   }, [router]);
 
+  // Auto-refresh is permanently on: while this page is open the board re-pulls
+  // the server-rendered alerts on this interval, so it never goes stale.
   useEffect(() => {
-    if (!auto) return;
     const id = setInterval(() => router.refresh(), AUTO_REFRESH_MS);
     return () => clearInterval(id);
-  }, [auto, router]);
+  }, [router]);
 
   return (
     <div className="flex flex-wrap items-center gap-2">
@@ -83,12 +83,11 @@ export default function RunCheck() {
         type="button"
         size="sm"
         variant="outline"
-        onClick={() => setAuto((v) => !v)}
-        aria-pressed={auto}
-        title="Poll for updates every 60s"
+        onClick={() => router.refresh()}
+        title="Auto-refresh is always on (every 60s). Click to refresh now."
       >
-        <RefreshCw className={`size-4 ${auto ? "animate-spin" : ""}`} />
-        Auto-refresh {auto ? "on" : "off"}
+        <RefreshCw className="size-4 animate-spin" />
+        Auto-refresh on
       </Button>
       <Button type="button" size="sm" onClick={runCheck} disabled={running}>
         {running ? <Loader2 className="size-4 animate-spin" /> : <Play className="size-4" />}

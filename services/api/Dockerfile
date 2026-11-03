@@ -39,8 +39,10 @@ EXPOSE 8000
 
 # Readiness probe: /api/health/ready returns 503 until the DB answers SELECT 1,
 # so this also acts as a dependency-aware gate for compose/k8s. Uses the venv's
-# interpreter (no curl in slim). start-period gives the warm-up pass time.
-HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-    CMD ["python", "-c", "import sys,urllib.request as u; sys.exit(0 if u.urlopen('http://127.0.0.1:8000/api/health/ready', timeout=3).status==200 else 1)"]
+# interpreter (no curl in slim). The long start-period covers the cold-start
+# warm-up / pre-seed storm, which momentarily starves the connection pool the
+# probe needs - keep it in step with the compose healthcheck override.
+HEALTHCHECK --interval=15s --timeout=10s --start-period=180s --retries=5 \
+    CMD ["python", "-c", "import sys,urllib.request as u; sys.exit(0 if u.urlopen('http://127.0.0.1:8000/api/health/ready', timeout=8).status==200 else 1)"]
 
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

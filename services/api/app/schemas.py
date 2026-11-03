@@ -206,6 +206,49 @@ class DashboardResponse(BaseModel):
     withheld_alerts: int = 0
 
 
+class WatchlistPageSize(IntEnum):
+    """Closed set of page sizes the market-wide watchlist may request.
+
+    An ``IntEnum`` (not an integer ``Literal``) for the same reason as
+    ``CatalogPageSize``: FastAPI binds query params as strings and Pydantic
+    coerces a numeric string into an int enum but refuses to coerce it into an
+    integer ``Literal`` - the latter would 422 every legitimate ``?size=50``.
+    Still emits the closed ``[50, 100, 200]`` set in OpenAPI."""
+
+    S_50 = 50
+    S_100 = 100
+    S_200 = 200
+
+
+class WatchlistPageResponse(BaseModel):
+    """One server-paginated page of the risk watchlist over the full market.
+
+    ``items`` is exactly one page (``size`` rows) of latest monitored snapshots,
+    already sorted/filtered/searched in SQL. ``total`` is the count of monitored
+    protocols matching the active band/search + the caller's data scope (before
+    paging) and ``pages`` the derived page count - both computed server-side so
+    the UI never fetches all ~5000 rows to paginate locally.
+
+    ``stats``/``band_counts``/``as_of`` describe the *whole* scoped board, not
+    just this page (or the active band filter): the hero tiles must read the
+    true market totals while the table shows a page. ``withheld`` mirrors the
+    dashboard's alert-withholding count for the caller's clearance."""
+
+    items: list[ProtocolOverview] = Field(default_factory=list)
+    total: int
+    page: int
+    size: int
+    pages: int
+    sort: str
+    dir: str
+    band: str | None = None
+    q: str | None = None
+    stats: DashboardStats
+    band_counts: dict[str, int] = Field(default_factory=dict)
+    as_of: str | None = None
+    withheld: int = 0
+
+
 class SubjectOut(BaseModel):
     """The authenticated caller, as the UI needs it.
 
@@ -414,7 +457,10 @@ class CoverageStatus(BaseModel):
     # switched on, never which model, host or credential is in use.
     llm_configured: bool = False
     onchain_configured: bool = False
-    monitor_interval_minutes: int = 30
+    # Default mirrors config.monitor_interval_minutes; the live response always
+    # carries the configured value from status.py, so this only shows in the
+    # OpenAPI contract for an unset field.
+    monitor_interval_minutes: int = 2
     # Curated watchlist size from configuration (not from the DB), so a cold
     # empty store still shows what the service is meant to cover.
     protocols_curated: int = 0

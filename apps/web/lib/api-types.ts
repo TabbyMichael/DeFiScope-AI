@@ -338,6 +338,11 @@ export interface paths {
          *     page of rows is ever returned. ``sort`` is bound to an allowlisted column
          *     (see ``catalog.SORT_COLUMNS``) - the caller's string never reaches SQL as
          *     text - and ordering is made deterministic with a slug tiebreak.
+         *
+         *     A successful page is cached in Redis (when configured) keyed by the query
+         *     *and* the caller's scope; a cache hit skips the cold-start check, both
+         *     ``COUNT``s and the paged scan. With no Redis set every cache helper no-ops
+         *     and this is exactly the uncached DB read it was before.
          */
         get: operations["list_protocols_api_protocols_get"];
         put?: never;
@@ -360,6 +365,10 @@ export interface paths {
          * @description Distinct chain and category values present in the catalog, for the
          *     Explorer's filter selectors. Declared before ``/{slug}`` so "facets" is not
          *     swallowed as a protocol slug.
+         *
+         *     Cached in Redis (when configured) by the catalog version; a hit skips the
+         *     cold-start check and the two distinct scans. Uncached/faulted reads degrade
+         *     to the current database path unchanged.
          */
         get: operations["protocol_facets_api_protocols_facets_get"];
         put?: never;
@@ -377,7 +386,18 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Protocol Detail */
+        /**
+         * Protocol Detail
+         * @description One protocol's research payload, assembled entirely from the DB.
+         *
+         *     No longer a live DefiLlama crawl: the monitoring/pre-seed pass persists every
+         *     field this renders, so opening a page is an indexed row read (sub-20ms) and a
+         *     DefiLlama outage cannot slow it. A listed-but-uncaptured slug returns the
+         *     catalog header with analysis fields as honest gaps; a slug with no catalog
+         *     row *and* no snapshot is a genuine 404. Scope is enforced against the loaded
+         *     row's category/chain exactly as the crawl path did, so a slug can never be
+         *     opened out of scope nor hidden in scope.
+         */
         get: operations["protocol_detail_api_protocols__slug__get"];
         put?: never;
         post?: never;
@@ -439,6 +459,35 @@ export interface paths {
          * @description Aggregate coverage of the store: protocols, days, bands, alerts, index.
          */
         get: operations["status_api_status_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/watchlist": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Watchlist
+         * @description Market-wide risk watchlist, server-paginated over every monitored
+         *     protocol (~5000) entirely in SQL - sorting, band filter, search and paging
+         *     all happen server-side, so only one page of rows is ever serialized.
+         *
+         *     The same ``protocols:read`` RBAC gate and ABAC ``scope`` narrowing as the
+         *     dashboard are applied *in the query*, so ``total``, the page and the hero
+         *     aggregates all reflect only what the caller may see - a scoped analyst can
+         *     never bypass scope by URL to count or read rows they cannot open. The hero
+         *     stats/band counts span the whole scoped board (not just this page); spark
+         *     lines are fetched only for the returned page.
+         */
+        get: operations["watchlist_api_watchlist_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -629,7 +678,7 @@ export interface components {
             llm_configured: boolean;
             /**
              * Monitor Interval Minutes
-             * @default 30
+             * @default 2
              */
             monitor_interval_minutes: number;
             /** Observation Days */
@@ -1099,6 +1148,65 @@ export interface components {
             /** Error Type */
             type: string;
         };
+        /**
+         * WatchlistPageResponse
+         * @description One server-paginated page of the risk watchlist over the full market.
+         *
+         *     ``items`` is exactly one page (``size`` rows) of latest monitored snapshots,
+         *     already sorted/filtered/searched in SQL. ``total`` is the count of monitored
+         *     protocols matching the active band/search + the caller's data scope (before
+         *     paging) and ``pages`` the derived page count - both computed server-side so
+         *     the UI never fetches all ~5000 rows to paginate locally.
+         *
+         *     ``stats``/``band_counts``/``as_of`` describe the *whole* scoped board, not
+         *     just this page (or the active band filter): the hero tiles must read the
+         *     true market totals while the table shows a page. ``withheld`` mirrors the
+         *     dashboard's alert-withholding count for the caller's clearance.
+         */
+        WatchlistPageResponse: {
+            /** As Of */
+            as_of?: string | null;
+            /** Band */
+            band?: string | null;
+            /** Band Counts */
+            band_counts?: {
+                [key: string]: number;
+            };
+            /** Dir */
+            dir: string;
+            /** Items */
+            items?: components["schemas"]["ProtocolOverview"][];
+            /** Page */
+            page: number;
+            /** Pages */
+            pages: number;
+            /** Q */
+            q?: string | null;
+            /** Size */
+            size: number;
+            /** Sort */
+            sort: string;
+            stats: components["schemas"]["DashboardStats"];
+            /** Total */
+            total: number;
+            /**
+             * Withheld
+             * @default 0
+             */
+            withheld: number;
+        };
+        /**
+         * WatchlistPageSize
+         * @description Closed set of page sizes the market-wide watchlist may request.
+         *
+         *     An ``IntEnum`` (not an integer ``Literal``) for the same reason as
+         *     ``CatalogPageSize``: FastAPI binds query params as strings and Pydantic
+         *     coerces a numeric string into an int enum but refuses to coerce it into an
+         *     integer ``Literal`` - the latter would 422 every legitimate ``?size=50``.
+         *     Still emits the closed ``[50, 100, 200]`` set in OpenAPI.
+         * @enum {integer}
+         */
+        WatchlistPageSize: 50 | 100 | 200;
     };
     responses: never;
     parameters: never;
@@ -1671,6 +1779,48 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CoverageStatus"];
+                };
+            };
+        };
+    };
+    watchlist_api_watchlist_get: {
+        parameters: {
+            query?: {
+                /** @description 1-based page number */
+                page?: number;
+                /** @description rows per page */
+                size?: components["schemas"]["WatchlistPageSize"];
+                /** @description sort column */
+                sort?: "risk" | "tvl" | "7d" | "30d";
+                /** @description sort direction */
+                dir?: "asc" | "desc";
+                /** @description filter by risk band */
+                band?: string | null;
+                /** @description search name or slug */
+                q?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WatchlistPageResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

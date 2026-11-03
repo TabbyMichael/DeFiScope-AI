@@ -1,10 +1,13 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { useRouter, usePathname } from "next/navigation";
 import {
   ArrowDownRight,
   ArrowUpRight,
+  ChevronLeft,
+  ChevronRight,
   Gauge,
   ShieldAlert,
   SlidersHorizontal,
@@ -21,8 +24,8 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { fmtPct, fmtUsd } from "@/lib/api-config";
-import type { DashboardStats, ProtocolOverview } from "@/lib/types";
+import { fmtPct, fmtUsd, watchlistQuerystring } from "@/lib/api-config";
+import type { DashboardStats, ProtocolOverview, WatchlistPage } from "@/lib/types";
 
 type SortKey = "risk" | "tvl" | "7d" | "30d";
 
@@ -43,6 +46,8 @@ const SORT_LABELS: Record<SortKey, string> = {
   "7d": "7d change",
   "30d": "30d change",
 };
+
+const SIZES = [50, 100, 200] as const;
 
 function num(v: number | null | undefined): number {
   return v == null || Number.isNaN(v) ? -Infinity : v;
@@ -72,7 +77,7 @@ function WatchRow({
       style={{ animationDelay: `${delay}ms` }}
       className="group animate-in fade-in slide-in-from-bottom-2 flex items-center gap-3 rounded-xl border border-transparent px-2.5 py-2 transition-colors duration-200 hover:border-border hover:bg-accent/60 focus-visible:border-ring"
     >
-      <span className="w-5 shrink-0 text-center text-xs tabular-nums text-muted-foreground">
+      <span className="w-7 shrink-0 text-center text-xs tabular-nums text-muted-foreground">
         {rank}
       </span>
 
@@ -141,167 +146,149 @@ function WatchRow({
   );
 }
 
-export default function WatchlistBoard({
+function EmptyRows() {
+  return (
+    <div className="flex flex-col items-center gap-1 rounded-xl border border-dashed py-10 text-center">
+      <ShieldAlert className="size-5 text-muted-foreground" />
+      <p className="text-sm text-muted-foreground">No scored protocols in this view yet.</p>
+      <p className="text-xs text-muted-foreground/70">
+        A missing score is a data gap, never a claim that a protocol is safe.
+      </p>
+    </div>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/* Section variant: the compact Overview board. Client-side over the capped   */
+/* dashboard preview (a small, already-loaded slice) - no server round-trips. */
+/* -------------------------------------------------------------------------- */
+
+function SectionBoard({
   protocols,
   stats,
-  asOf,
-  variant = "section",
 }: {
   protocols: ProtocolOverview[];
   stats: DashboardStats;
-  asOf?: string | null;
-  variant?: "section" | "page";
 }) {
-  const [sort, setSort] = useState<SortKey>("risk");
-  const [band, setBand] = useState<string>("all");
-  const [q, setQ] = useState("");
-
-  const page = variant === "page";
-
-  const scoredCount = useMemo(
-    () => protocols.filter((p) => p.risk_score != null && p.risk_band !== "unknown").length,
+  // Highest risk first, mirroring the page's default sort so both surfaces
+  // rank the same way. The full-market filter/sort/pagination lives on /watchlist.
+  // Eight rows tall: the Overview's right column is grid-stretched to match the
+  // tall protocols catalog beside it, so the card elongates to fill that space.
+  const rows = useMemo(
+    () => [...protocols].sort((a, b) => num(b.risk_score) - num(a.risk_score)).slice(0, 8),
     [protocols],
   );
 
-  const visible = useMemo(() => {
-    const needle = q.trim().toLowerCase();
-    const rows = protocols.filter((p) => {
-      if (band !== "all") {
-        const b = p.risk_score != null && p.risk_band !== "unknown" ? p.risk_band : "unknown";
-        if (b !== band) return false;
-      }
-      if (needle && !p.name.toLowerCase().includes(needle) && !p.slug.includes(needle)) {
-        return false;
-      }
-      return true;
-    });
-    const key = (p: ProtocolOverview): number =>
-      sort === "risk"
-        ? num(p.risk_score)
-        : sort === "tvl"
-          ? num(p.tvl)
-          : sort === "7d"
-            ? num(p.change_7d)
-            : num(p.change_30d);
-    // Highest-first for every key (risk, tvl, and changes all read "top" high).
-    return [...rows].sort((a, b) => key(b) - key(a));
-  }, [protocols, band, q, sort]);
-
-  const rows = page ? visible : visible.slice(0, 6);
-
-  const body = (
-    <>
-      {page && (
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="relative min-w-[180px] flex-1">
-            <Input
-              value={q}
-              onChange={(e) => setQ(e.target.value)}
-              placeholder="Search tracked protocols…"
-              className="h-9 pl-3"
-              aria-label="Search protocols"
-            />
-          </div>
-          <div className="flex items-center gap-1 rounded-lg border bg-card p-1 text-xs">
-            <SlidersHorizontal className="ml-1 size-3.5 text-muted-foreground" />
-            {(Object.keys(SORT_LABELS) as SortKey[]).map((k) => (
-              <button
-                key={k}
-                type="button"
-                onClick={() => setSort(k)}
-                className={`rounded-md px-2 py-1 transition-colors ${
-                  sort === k
-                    ? "bg-emerald-500/15 font-medium text-emerald-700 dark:text-emerald-400"
-                    : "text-muted-foreground hover:bg-accent hover:text-foreground"
-                }`}
-              >
-                {SORT_LABELS[k]}
-              </button>
+  return (
+    <Card>
+      <CardHeader>
+        <CardDescription className="flex items-center justify-between gap-2">
+          <span className="flex items-center gap-1.5">
+            <ShieldAlert className="size-3.5" /> Tracked protocols, by risk
+            <span className="text-muted-foreground/70">
+              · showing {rows.length} of {stats.protocol_count}
+            </span>
+          </span>
+        </CardDescription>
+        <div className="flex items-baseline justify-between gap-2">
+          <CardTitle>Risk watchlist</CardTitle>
+          <Link
+            href="/watchlist"
+            className="text-xs font-normal text-muted-foreground underline-offset-2 hover:text-emerald-600 hover:underline dark:hover:text-emerald-400"
+          >
+            Open watchlist →
+          </Link>
+        </div>
+      </CardHeader>
+      <CardContent>
+        {rows.length === 0 ? (
+          <EmptyRows />
+        ) : (
+          <div className="space-y-0.5">
+            {rows.map((p, i) => (
+              <WatchRow key={p.slug} p={p} rank={i + 1} dense index={i} />
             ))}
           </div>
-        </div>
-      )}
-
-      {page && (
-        <div className="flex flex-wrap gap-1.5">
-          {["all", ...BANDS.filter((b) => protocols.some((p) =>
-            (p.risk_score != null && p.risk_band !== "unknown" ? p.risk_band : "unknown") === b,
-          ))].map((b) => (
-            <button
-              key={b}
-              type="button"
-              onClick={() => setBand(b)}
-              className={`rounded-full border px-2.5 py-1 text-xs capitalize transition-colors ${
-                band === b
-                  ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
-                  : "border-border bg-card text-muted-foreground hover:bg-accent"
-              }`}
-            >
-              {b === "all" ? `All (${protocols.length})` : b}
-            </button>
-          ))}
-        </div>
-      )}
-
-      {rows.length === 0 ? (
-        <div className="flex flex-col items-center gap-1 rounded-xl border border-dashed py-10 text-center">
-          <ShieldAlert className="size-5 text-muted-foreground" />
-          <p className="text-sm text-muted-foreground">
-            No scored protocols in this view yet.
-          </p>
-          <p className="text-xs text-muted-foreground/70">
-            A missing score is a data gap, never a claim that a protocol is safe.
-          </p>
-        </div>
-      ) : (
-        <div className="space-y-0.5">
-          {rows.map((p, i) => (
-            <WatchRow key={p.slug} p={p} rank={i + 1} dense={!page} index={i} />
-          ))}
-        </div>
-      )}
-    </>
+        )}
+      </CardContent>
+    </Card>
   );
+}
 
-  if (!page) {
-    // Compact dashboard section: a tight "highest risk" board that links out.
-    return (
-      <Card>
-        <CardHeader>
-          <CardDescription className="flex items-center justify-between gap-2">
-            <span className="flex items-center gap-1.5">
-              <ShieldAlert className="size-3.5" /> Tracked protocols, by risk
-            </span>
-          </CardDescription>
-          <div className="flex items-baseline justify-between gap-2">
-            <CardTitle>Risk watchlist</CardTitle>
-            <Link
-              href="/watchlist"
-              className="text-xs font-normal text-muted-foreground underline-offset-2 hover:text-emerald-600 hover:underline dark:hover:text-emerald-400"
-            >
-              Open watchlist →
-            </Link>
-          </div>
-        </CardHeader>
-        <CardContent>{body}</CardContent>
-      </Card>
-    );
+/* -------------------------------------------------------------------------- */
+/* Page variant: server-paginated over the full ~5000-row market. Controls    */
+/* mutate the URL search params (the server component re-fetches one page);   */
+/* hero/band tiles read the server summary, never the current page's length.  */
+/* -------------------------------------------------------------------------- */
+
+function PageBoard({ data }: { data: WatchlistPage }) {
+  const router = useRouter();
+  const pathname = usePathname();
+
+  const currentSort: SortKey = data.sort in SORT_LABELS ? (data.sort as SortKey) : "risk";
+  const currentDir = data.dir === "asc" ? "asc" : "desc";
+  const currentBand = data.band ?? undefined;
+  const serverQ = data.q ?? "";
+
+  const [qInput, setQInput] = useState(serverQ);
+
+  // Re-sync the box when the URL (and thus data.q) changes from elsewhere
+  // (band clicks, back/forward, a mover link). The "adjust state on prop
+  // change during render" pattern - not an effect - per the React guidance,
+  // so we never cascade a render from a synchronous setState in an effect.
+  const [prevQ, setPrevQ] = useState(serverQ);
+  if (serverQ !== prevQ) {
+    setPrevQ(serverQ);
+    setQInput(serverQ);
   }
 
-  // Full page: a hero summary + the interactive ranked board.
-  const avgRisk =
-    scoredCount > 0
-      ? protocols.reduce((s, p) => s + (p.risk_score ?? 0), 0) / scoredCount
-      : 0;
+  function push(patch: {
+    page?: number;
+    size?: number;
+    sort?: SortKey;
+    dir?: "asc" | "desc";
+    band?: string;
+    q?: string;
+  }) {
+    const merged = {
+      page: patch.page ?? (patch.sort || patch.dir || patch.band !== undefined || patch.q !== undefined ? 1 : data.page),
+      size: (patch.size ?? data.size) as 50 | 100 | 200,
+      sort: patch.sort ?? currentSort,
+      dir: patch.dir ?? currentDir,
+      band: patch.band ?? currentBand,
+      q: patch.q !== undefined ? patch.q : serverQ,
+    };
+    const qs = watchlistQuerystring(merged);
+    router.push(`${pathname}${qs}`);
+  }
+
+  // Debounced search: one navigation per pause, not one per keystroke, so we
+  // never stampede the paginated endpoint while a term is being typed.
+  useEffect(() => {
+    const term = qInput.trim();
+    if (term === serverQ) return;
+    const t = setTimeout(() => push({ q: term }), 350);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [qInput]);
+
+  const scoredCount = Object.entries(data.band_counts)
+    .filter(([k]) => k !== "unknown")
+    .reduce((s, [, v]) => s + v, 0);
+
+  const offset = (data.page - 1) * data.size;
+  const items = data.items ?? [];
 
   return (
     <div className="space-y-6">
+      {/* Hero: market-wide totals straight from the server summary, so they
+          stay truthful no matter which page / band / search is active. */}
       <section className="animate-in fade-in slide-in-from-bottom-3 rounded-2xl border bg-gradient-to-br from-card to-muted/40 p-5 sm:p-6">
         <div className="flex flex-wrap items-end justify-between gap-4">
           <div>
             <p className="text-sm text-muted-foreground">Tracked protocols</p>
             <p className="text-3xl font-semibold tabular-nums">
-              <AnimatedNumber value={protocols.length} />
+              <AnimatedNumber value={data.stats.protocol_count} />
               <span className="ml-2 text-base font-normal text-muted-foreground">
                 {scoredCount} scored
               </span>
@@ -311,56 +298,203 @@ export default function WatchlistBoard({
             <div>
               <p className="text-xs text-muted-foreground">Board TVL</p>
               <p className="text-lg font-semibold tabular-nums">
-                <AnimatedNumber value={stats.total_tvl} format={fmtUsd} />
-              </p>
-            </div>
-            <div>
-              <p className="text-xs text-muted-foreground">Avg composite</p>
-              <p className="text-lg font-semibold tabular-nums">
-                <AnimatedNumber value={Math.round(avgRisk)} />
+                <AnimatedNumber value={data.stats.total_tvl} format={fmtUsd} />
               </p>
             </div>
             <div>
               <p className="text-xs text-muted-foreground">Active alerts</p>
               <p className="text-lg font-semibold tabular-nums">
-                <AnimatedNumber value={stats.active_critical + stats.active_warning} />
+                <AnimatedNumber value={data.stats.active_critical + data.stats.active_warning} />
+              </p>
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground">Top 7d mover</p>
+              <p className="text-lg font-semibold tabular-nums">
+                {data.stats.top_gainer ? (
+                  <span className="text-emerald-600 dark:text-emerald-400">
+                    {data.stats.top_gainer.name} {fmtPct(data.stats.top_gainer.change_7d)}
+                  </span>
+                ) : (
+                  <span className="text-muted-foreground">n/a</span>
+                )}
               </p>
             </div>
           </div>
         </div>
-        {asOf && (
+        {data.as_of && (
           <p className="mt-3 flex items-center gap-1.5 text-xs text-muted-foreground">
-            <Gauge className="size-3.5" /> data as of {asOf}
+            <Gauge className="size-3.5" /> data as of {data.as_of} · market-wide view,
+            refreshed continuously
           </p>
         )}
       </section>
 
-      {page && (
-        <section className="animate-in fade-in grid grid-cols-2 gap-2 sm:grid-cols-5">
-          {BANDS.map((b) => {
-            const count = protocols.filter(
-              (p) => (p.risk_score != null && p.risk_band !== "unknown" ? p.risk_band : "unknown") === b,
-            ).length;
-            const pct = protocols.length ? (count / protocols.length) * 100 : 0;
-            return (
-              <div key={b} className="rounded-xl border bg-card p-3">
-                <div className="flex items-baseline justify-between">
-                  <span className="text-xs capitalize text-muted-foreground">{b}</span>
-                  <span className="text-lg font-semibold tabular-nums">{count}</span>
-                </div>
-                <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-muted">
-                  <div
-                    className={`wl-meter h-full rounded-full bg-gradient-to-r ${METER[b]}`}
-                    style={{ width: `${Math.max(pct, count > 0 ? 6 : 0)}%` }}
-                  />
-                </div>
+      {/* Band tiles: server-side counts over the whole scoped board. */}
+      <section className="animate-in fade-in grid grid-cols-2 gap-2 sm:grid-cols-5">
+        {BANDS.map((b) => {
+          const count = data.band_counts[b] ?? 0;
+          const pct = data.stats.protocol_count ? (count / data.stats.protocol_count) * 100 : 0;
+          return (
+            <div key={b} className="rounded-xl border bg-card p-3">
+              <div className="flex items-baseline justify-between">
+                <span className="text-xs capitalize text-muted-foreground">{b}</span>
+                <span className="text-lg font-semibold tabular-nums">{count}</span>
               </div>
+              <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-muted">
+                <div
+                  className={`wl-meter h-full rounded-full bg-gradient-to-r ${METER[b]}`}
+                  style={{ width: `${Math.max(pct, count > 0 ? 6 : 0)}%` }}
+                />
+              </div>
+            </div>
+          );
+        })}
+      </section>
+
+      {/* Search + sort controls (URL-driven). */}
+      <section className="space-y-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="relative min-w-[180px] flex-1">
+            <Input
+              value={qInput}
+              onChange={(e) => setQInput(e.target.value)}
+              placeholder="Search tracked protocols…"
+              className="h-9 pl-3"
+              aria-label="Search protocols"
+            />
+          </div>
+          <div className="flex items-center gap-1 rounded-lg border bg-card p-1 text-xs">
+            <SlidersHorizontal className="ml-1 size-3.5 text-muted-foreground" />
+            {(Object.keys(SORT_LABELS) as SortKey[]).map((k) => {
+              const active = currentSort === k;
+              return (
+                <button
+                  key={k}
+                  type="button"
+                  onClick={() =>
+                    active
+                      ? push({ sort: k, dir: currentDir === "desc" ? "asc" : "desc" })
+                      : push({ sort: k, dir: "desc" })
+                  }
+                  className={`rounded-md px-2 py-1 transition-colors ${
+                    active
+                      ? "bg-emerald-500/15 font-medium text-emerald-700 dark:text-emerald-400"
+                      : "text-muted-foreground hover:bg-accent hover:text-foreground"
+                  }`}
+                >
+                  {SORT_LABELS[k]}
+                  {active ? (currentDir === "desc" ? " ↓" : " ↑") : ""}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Band chips: driven by the tile counts, so they never contradict the hero. */}
+        <div className="flex flex-wrap gap-1.5">
+          <button
+            type="button"
+            onClick={() => push({ band: "" })}
+            className={`rounded-full border px-2.5 py-1 text-xs transition-colors ${
+              !currentBand
+                ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
+                : "border-border bg-card text-muted-foreground hover:bg-accent"
+            }`}
+          >
+            All ({data.stats.protocol_count})
+          </button>
+          {BANDS.filter((b) => (data.band_counts[b] ?? 0) > 0).map((b) => {
+            const active = currentBand === b;
+            return (
+              <button
+                key={b}
+                type="button"
+                onClick={() => push({ band: active ? "" : b })}
+                className={`rounded-full border px-2.5 py-1 text-xs capitalize transition-colors ${
+                  active
+                    ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
+                    : "border-border bg-card text-muted-foreground hover:bg-accent"
+                }`}
+              >
+                {b}
+              </button>
             );
           })}
-        </section>
-      )}
+        </div>
 
-      <section className="space-y-3">{body}</section>
+        {items.length === 0 ? (
+          <EmptyRows />
+        ) : (
+          <div className="space-y-0.5">
+            {items.map((p, i) => (
+              <WatchRow key={p.slug} p={p} rank={offset + i + 1} dense={false} index={i} />
+            ))}
+          </div>
+        )}
+
+        {/* Pagination footer: Prev/Next, page size and a truthful page window. */}
+        <div className="flex flex-wrap items-center justify-between gap-3 pt-1 text-xs text-muted-foreground">
+          <div className="flex items-center gap-2">
+            <span>Rows per page</span>
+            <select
+              value={data.size}
+              onChange={(e) => push({ size: Number(e.target.value), page: 1 })}
+              className="rounded-md border bg-card px-1.5 py-1 text-foreground"
+              aria-label="Rows per page"
+            >
+              {SIZES.map((s) => (
+                <option key={s} value={s}>
+                  {s}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            {data.total > 0
+              ? `Showing ${offset + 1}–${offset + items.length} of ${data.total.toLocaleString()}`
+              : "No matching protocols"}
+          </div>
+          <div className="flex items-center gap-1.5">
+            <button
+              type="button"
+              onClick={() => push({ page: data.page - 1 })}
+              disabled={data.page <= 1}
+              className="inline-flex items-center gap-1 rounded-md border bg-card px-2 py-1 transition-colors hover:bg-accent disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              <ChevronLeft className="size-3.5" /> Prev
+            </button>
+            <span className="tabular-nums">
+              Page {data.page} / {Math.max(data.pages, 1)}
+            </span>
+            <button
+              type="button"
+              onClick={() => push({ page: data.page + 1 })}
+              disabled={data.page >= data.pages}
+              className="inline-flex items-center gap-1 rounded-md border bg-card px-2 py-1 transition-colors hover:bg-accent disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              Next <ChevronRight className="size-3.5" />
+            </button>
+          </div>
+        </div>
+      </section>
     </div>
   );
+}
+
+export default function WatchlistBoard({
+  protocols,
+  stats,
+  variant = "section",
+  data,
+}: {
+  protocols?: ProtocolOverview[];
+  stats: DashboardStats;
+  variant?: "section" | "page";
+  data?: WatchlistPage;
+}) {
+  if (variant === "page") {
+    if (!data) return null;
+    return <PageBoard data={data} />;
+  }
+  return <SectionBoard protocols={protocols ?? []} stats={stats} />;
 }

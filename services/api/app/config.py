@@ -118,7 +118,14 @@ class Settings(BaseSettings):
 
     # Market-wide tracking: auto-include the top N protocols by TVL from the
     # DefiLlama directory (deduplicated against the curated list). 0 disables.
-    market_top_n: int = 50
+    #
+    # Sized for a market-wide risk board (~5000 protocols after category/slug
+    # exclusions), not a token demo. The full set is *monitored* (feeds the
+    # board, aggregates and alerts), but the crawl is NOT run over all 5000 in
+    # one pass - see ``monitor_refresh_batch_size`` below, which bounds each
+    # pass to a rolling slice so a single scheduler tick stays within the
+    # interval and never hammers DefiLlama or saturates the DB pool.
+    market_top_n: int = 5000
 
     # Directory categories excluded from auto-discovery. CEX wallets, canonical
     # bridge locks and chain-infrastructure totals are custody/consensus sums,
@@ -133,11 +140,52 @@ class Settings(BaseSettings):
     # The public API has no documented rate limit; keep this modest.
     crawl_concurrency: int = 8
 
-    # How often the scheduler re-evaluates every tracked protocol. Published on
-    # the public /api/status response and rendered on the landing page, so the
-    # claimed freshness is the configured reality rather than a constant that
-    # could drift away from the code that schedules the pass.
-    monitor_interval_minutes: int = 30
+    # How often the scheduler re-evaluates a bounded slice of the watchlist.
+    # Published on the public /api/status response and rendered on the landing
+    # page, so the claimed freshness is the configured reality rather than a
+    # constant that could drift away from the code that schedules the pass.
+    #
+    # Set to 2 minutes for near-live alerting. The curated core (plus the
+    # previous pass's top movers) is re-evaluated on every tick, so high-profile
+    # alerts land within ~2 minutes. The non-curated tail refreshes in rolling
+    # batches bounded by ``monitor_refresh_batch_size``, so a FULL sweep of the
+    # whole watchlist takes
+    #     interval_minutes * ceil(market_top_n / monitor_refresh_batch_size)
+    # which at the defaults is 2 * ceil(5000 / 600) ~= 18 minutes - individual
+    # tail rows are therefore up to ~18 min old even though the board ticks every
+    # 2. Raise the batch (or lower this interval) to sweep the tail faster, at
+    # more DefiLlama and DB-pool load per tick.
+    #
+    # HONESTY CAVEAT: DefiLlama's headline daily TVL is itself republished only
+    # hourly, so a 2-minute cadence does NOT conjure a newer TVL number than
+    # upstream has published. What it buys is faster *reaction* - intra-day
+    # series (fees/volume, peg/coin charts, Dune-backed activity) and any
+    # upstream insert are re-scored within ~2 minutes instead of ~15, and the
+    # stale_data rule sees a stalled source sooner. The pass is idempotent per
+    # protocol/rule/day (deterministic alert ids + notify cooldown), so a faster
+    # cadence re-checks without re-notifying the same finding. MUST stay in
+    # lockstep with services.api.protocols.CACHE_TTL_SECONDS: if the per-protocol
+    # research cache TTL exceeds this interval, a pass just re-scores cached data
+    # and the extra ticks buy nothing.
+    monitor_interval_minutes: int = 2
+
+    # Non-curated protocols re-crawled per monitoring pass, chosen round-robin
+    # (never-seen first by TVL desc to bootstrap the board fast, then oldest
+    # ``captured_at`` first). Bounds the crawl work of a single tick so a 5000-
+    # protocol watchlist drains across passes rather than overrunning one of
+    # them. Raise for a faster full sweep (more upstream load per pass); lower
+    # for a gentler DefiLlama footprint at the cost of staleness in the tail.
+    monitor_refresh_batch_size: int = 600
+
+    # Always re-evaluate the curated core (plus the previous pass's top movers)
+    # every pass, on top of the rolling batch, so crisp alerts and a stable
+    # high-profile board never wait their turn in the round-robin queue.
+    monitor_always_curated: bool = True
+
+    # Max protocols returned inline by /api/dashboard (the Overview compact
+    # board preview). Aggregate stats still span the *full* monitored set, but
+    # the payload stays small; the full market is paged via /api/watchlist.
+    board_preview_size: int = 120
 
     # Bound on the in-process per-protocol research cache (LRU). Keeps memory
     # flat on long-lived processes that discover the whole market.

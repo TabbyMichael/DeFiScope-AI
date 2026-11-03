@@ -1,5 +1,7 @@
 import { Bell, Check, Gauge, Info, Layers, Scale, X } from "lucide-react";
+import { Suspense } from "react";
 
+import LiveCadence from "@/components/live-cadence";
 import {
   Card,
   CardContent,
@@ -167,7 +169,10 @@ export default function AboutPage() {
         <Card>
           <CardHeader>
             <CardDescription className="flex items-center gap-1.5">
-              <Bell className="size-3.5" /> Evaluated every 30 minutes
+              <Bell className="size-3.5" /> Evaluated every{" "}
+              <Suspense fallback="a few minutes">
+                <LiveCadence />
+              </Suspense>
             </CardDescription>
             <CardTitle>Alert rules &amp; thresholds</CardTitle>
           </CardHeader>

@@ -8,16 +8,18 @@ and keeps alert semantics out of the scheduler.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import logging
 from datetime import UTC, datetime, timedelta
 
+from sqlalchemy import func
 from sqlalchemy.dialects import postgresql, sqlite
 from sqlalchemy.orm import Session
 
 from app.analysis import metrics
 from app.config import get_settings
-from app.db import AlertRecord, ProtocolSnapshot
+from app.db import AlertRecord, ProtocolCatalog, ProtocolSnapshot
 from app.notifiers import Notification, build_notifiers, severity_at_least
 from app.schemas import Alert
 from app.security.policy import split_visible_alerts
@@ -340,9 +342,7 @@ def _analysis_values(o, pack: ResearchPack) -> dict:
     }
 
 
-def persist_snapshots(
-    session: Session, packs: list[ResearchPack], monitored: int = 1
-) -> None:
+def persist_snapshots(session: Session, packs: list[ResearchPack], monitored: int = 1) -> None:
     """Store one full observation per protocol per day, refreshing an existing
     same-day row's analysis columns in place and letting the database arbitrate
     duplicate inserts. Writes the complete normalized overview (fees/volume/
@@ -507,25 +507,136 @@ async def notify_new_alerts(
     return len(to_send)
 
 
+def _next_refresh_slugs(
+    session: Session,
+    watchlist: list[str],
+    *,
+    curated: list[str],
+    batch_size: int,
+    always_curated: bool = True,
+) -> list[str]:
+    """Pick the bounded rolling slice of the watchlist to re-crawl this pass.
+
+    A 5000-protocol watchlist must NOT be crawled in one gather: it would
+    overrun the scheduler interval, hammer DefiLlama and saturate the DB pool
+    (the exact cold-start storm that flips the container unhealthy). So the
+    full set stays *monitored* while each pass refreshes only ``batch_size``
+    non-curated protocols, chosen round-robin:
+
+    1. **never-seen first, by catalog TVL desc** - a cold board fills top-down
+       so the market-wide view is useful within the first few passes rather
+       than after a full sweep;
+    2. **then the stalest monitored rows first** (oldest ``captured_at`` asc) -
+       the round-robin that keeps every row drifting toward current and lets
+       movers churn between passes.
+
+    The curated core is prepended (and excluded from the batch) so crisp alerts
+    and a stable high-profile board never wait their turn in the queue -
+    unless ``always_curated`` is off, in which case it competes for a slot too.
+
+    ``batch_size <= 0`` means "no bound" and returns the whole watchlist, the
+    pre-market-wide behaviour, kept for tests and small deployments."""
+    if batch_size <= 0:
+        return list(watchlist)
+
+    curated_set = set(curated)
+    rest = [s for s in watchlist if s not in curated_set]
+    if not rest:
+        return list(watchlist)
+
+    # Which non-curated slugs already have a monitored snapshot, and when that
+    # row was last captured. Absent from this map == never seen this pass.
+    captured = {
+        row.slug: row.last_captured
+        for row in session.query(
+            ProtocolSnapshot.slug,
+            func.max(ProtocolSnapshot.captured_at).label("last_captured"),
+        )
+        .filter(func.coalesce(ProtocolSnapshot.monitored, 1) != 0)
+        .filter(ProtocolSnapshot.slug.in_(rest))
+        .group_by(ProtocolSnapshot.slug)
+        .all()
+    }
+    never = [s for s in rest if s not in captured]
+    seen = [s for s in rest if s in captured]
+
+    # Bootstrap order: big names first, straight from the catalog TVL. A slug
+    # with no catalog row yet sorts last among the never-seen (0.0), which is
+    # correct - it is an unranked tail protocol.
+    if never:
+        tvl_by_slug = dict(
+            session.query(ProtocolCatalog.slug, ProtocolCatalog.tvl)
+            .filter(ProtocolCatalog.slug.in_(never))
+            .all()
+        )
+        never.sort(key=lambda s: tvl_by_slug.get(s) or 0.0, reverse=True)
+
+    # Round-robin order: refresh whatever was captured longest ago first.
+    # Naive (SQLite) and aware (Postgres) datetimes never meet here because
+    # every value comes from the same column, so a single sort key is safe.
+    epoch = datetime(1970, 1, 1, tzinfo=UTC)
+    seen.sort(key=lambda s: captured.get(s) or epoch)
+
+    batch = (never + seen)[:batch_size]
+    if always_curated:
+        return list(curated) + batch
+    # Curated competes for a slot: order the whole list, then bound it.
+    return (list(curated) + never + seen)[:batch_size]
+
+
+async def _crawl_in_chunks(
+    svc: ProtocolResearchService, http, slugs: list[str], session: Session
+) -> list[ResearchPack]:
+    """Fetch ``slugs`` in small chunks, yielding between them.
+
+    ``get_packs`` bounds network concurrency, but the per-pack pandas parsing is
+    CPU-bound and runs on the single event loop: one large gather monopolises it
+    for seconds, and interactive requests (login!) queue behind it - the same
+    starvation the pre-seed chunking exists to avoid. Reusing that posture here
+    keeps the API responsive while the bounded pass drains."""
+    chunk_size = max(1, svc.settings.preseed_chunk_size)
+    pause = svc.settings.preseed_chunk_pause_seconds
+    packs: list[ResearchPack] = []
+    for start in range(0, len(slugs), chunk_size):
+        chunk = slugs[start : start + chunk_size]
+        packs.extend(await svc.get_packs(chunk, http, session=session))
+        if pause and start + chunk_size < len(slugs):
+            await asyncio.sleep(pause)
+    return packs
+
+
 async def run_monitor(svc: ProtocolResearchService, http, session: Session) -> list[Alert]:
-    """Full monitoring pass: fetch the watchlist (curated + top-of-market auto
-    discovery), evaluate rules, persist alerts and daily snapshots, then fan
-    new alerts out to any configured delivery channels. Called by the scheduler
-    and the manual trigger endpoint."""
-    slugs = await svc.watchlist_slugs(http)
+    """Bounded monitoring pass: resolve the full watchlist (curated + top-of-
+    market auto discovery), refresh only the rolling slice chosen by
+    ``_next_refresh_slugs`` (so a 5000-protocol watchlist drains across passes
+    instead of overrunning one), evaluate rules on that slice, persist alerts and
+    daily snapshots, then fan new alerts out. Called by the scheduler and the
+    manual trigger endpoint."""
+    settings = svc.settings
+    watchlist = await svc.watchlist_slugs(http)
+    slugs = _next_refresh_slugs(
+        session,
+        watchlist,
+        curated=settings.protocol_slugs,
+        batch_size=settings.monitor_refresh_batch_size,
+        always_curated=settings.monitor_always_curated,
+    )
+    logger.info(
+        "Monitoring pass: refreshing %d of %d watchlist protocols", len(slugs), len(watchlist)
+    )
     # On-chain activity (second provider) is fetched *before* the packs are
     # built, so a pass renders the numbers it just measured rather than the
     # previous pass's. Strictly best-effort: this is the one place Dune is ever
     # called, and a Dune outage must cost the pass its on-chain block, not the
     # whole run. ``refresh`` is a no-op unless a key and a query id exist.
     try:
-        await onchain.refresh(session, http, slugs, svc.settings)
+        await onchain.refresh(session, http, slugs, settings)
     except Exception:  # noqa: BLE001 - second provider must never sink the pass
         logger.exception("On-chain refresh failed; continuing without it")
     # The session is threaded through so the packs built below pick up the rows
     # just written. Alert rules do not read ``pack.onchain``, but the snapshot
     # and RAG steps do, and they must see this pass's measurement.
-    packs = await svc.get_packs(slugs, http, session=session)
+    packs = await _crawl_in_chunks(svc, http, slugs, session)
     alerts: list[Alert] = []
     for pack in packs:
         try:

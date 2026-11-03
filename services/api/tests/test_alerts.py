@@ -1,11 +1,12 @@
 """Tests for alert rule evaluation."""
 
 import time
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
+import pytest
 from app.clients.defillama import ProtocolDetail, ProtocolSummary
 from app.config import get_settings
-from app.db import ProtocolSnapshot, SessionLocal
+from app.db import Base, ProtocolCatalog, ProtocolSnapshot, SessionLocal, engine
 from app.services import alerts
 from app.services.protocols import ResearchPack
 
@@ -187,6 +188,11 @@ class TestRunMonitorOnchainWiring:
             seen["slugs"] = slugs
 
         monkeypatch.setattr(alerts.onchain, "refresh", fake_refresh)
+        # ``batch_size = 0`` means "no bound": the pass refreshes the whole
+        # discovered watchlist at once (the pre-market-wide behaviour), so
+        # on-chain work must cover exactly those slugs. The bounded round-robin
+        # slicing itself is covered in ``TestNextRefreshSlugs``.
+        monkeypatch.setattr(get_settings(), "monitor_refresh_batch_size", 0)
         db = SessionLocal()
         try:
             await alerts.run_monitor(StubService(["aave-v3", "lido"]), object(), db)
@@ -281,3 +287,113 @@ class TestSnapshotWritesAreIdempotent:
             alerts._insert_snapshots_ignoring_conflicts(db, [])
         finally:
             db.close()
+
+
+@pytest.fixture()
+def refresh_db():
+    """A clean schema for the bounded-selection tests, torn down afterwards."""
+    Base.metadata.drop_all(engine)
+    Base.metadata.create_all(engine)
+    s = SessionLocal()
+    try:
+        yield s
+    finally:
+        s.close()
+        Base.metadata.drop_all(engine)
+
+
+def _snap(slug, *, captured_at, monitored=1):
+    return ProtocolSnapshot(
+        slug=slug,
+        date="2026-01-02",
+        name=slug,
+        tvl=1.0,
+        monitored=monitored,
+        captured_at=captured_at,
+    )
+
+
+def _cat(slug, tvl):
+    # ``name`` is NOT NULL on protocol_catalog, so every seeded row needs one.
+    return ProtocolCatalog(slug=slug, name=slug, tvl=tvl)
+
+
+class TestNextRefreshSlugs:
+    """The rolling slice a bounded pass crawls: curated core first, then a
+    never-seen bootstrap by catalog TVL, then the stalest monitored rows."""
+
+    def test_unbounded_batch_returns_whole_watchlist(self, refresh_db):
+        slugs = alerts._next_refresh_slugs(refresh_db, ["a", "b", "c"], curated=["a"], batch_size=0)
+        assert slugs == ["a", "b", "c"]
+
+    def test_curated_core_is_always_prepended(self, refresh_db):
+        refresh_db.add(_cat("n1", 500.0))
+        refresh_db.add(_cat("n2", 400.0))
+        refresh_db.commit()
+        # batch_size bounds only the NON-curated slice; the curated core rides on
+        # top, so a 1-protocol batch still yields curated + 1.
+        res = alerts._next_refresh_slugs(
+            refresh_db, ["c1", "n1", "n2"], curated=["c1"], batch_size=1
+        )
+        assert res == ["c1", "n1"]
+
+    def test_never_seen_bootstraps_by_catalog_tvl_desc(self, refresh_db):
+        refresh_db.add_all(
+            [
+                _cat("small", 10.0),
+                _cat("big", 1000.0),
+                _cat("mid", 100.0),
+            ]
+        )
+        refresh_db.commit()
+        res = alerts._next_refresh_slugs(
+            refresh_db, ["small", "big", "mid"], curated=[], batch_size=2
+        )
+        assert res == ["big", "mid"]
+
+    def test_seen_protocols_refresh_stalest_captured_at_first(self, refresh_db):
+        now = datetime.now(UTC)
+        refresh_db.add_all(
+            [
+                _snap("old", captured_at=now - timedelta(minutes=100)),
+                _snap("new", captured_at=now - timedelta(minutes=10)),
+            ]
+        )
+        refresh_db.commit()
+        res = alerts._next_refresh_slugs(refresh_db, ["old", "new"], curated=[], batch_size=1)
+        assert res == ["old"]
+
+    def test_preseed_only_row_is_treated_as_never_seen(self, refresh_db):
+        now = datetime.now(UTC)
+        # A monitored=1 row counts as "seen" (round-robin queue); a monitored=0
+        # pre-seed row is invisible to the board, so it must still be treated as
+        # never-seen and bootstrapped ahead of the stale seen row.
+        refresh_db.add(_snap("seen", captured_at=now, monitored=1))
+        refresh_db.add(_snap("preseed", captured_at=now, monitored=0))
+        refresh_db.add_all([_cat("seen", 1.0), _cat("preseed", 1.0)])
+        refresh_db.commit()
+        res = alerts._next_refresh_slugs(refresh_db, ["seen", "preseed"], curated=[], batch_size=1)
+        assert res == ["preseed"]
+
+    def test_curated_counts_against_batch_when_always_curated_off(self, refresh_db):
+        refresh_db.add(_cat("n1", 500.0))
+        refresh_db.add(_cat("n2", 400.0))
+        refresh_db.commit()
+        # Off: the total (curated + slice) is bounded, so curated eats a slot.
+        bounded = alerts._next_refresh_slugs(
+            refresh_db,
+            ["c1", "n1", "n2"],
+            curated=["c1"],
+            batch_size=2,
+            always_curated=False,
+        )
+        assert bounded == ["c1", "n1"]
+        # On: the slice is bounded to 2 and curated is added on top (3 total).
+        added = alerts._next_refresh_slugs(
+            refresh_db,
+            ["c1", "n1", "n2"],
+            curated=["c1"],
+            batch_size=2,
+            always_curated=True,
+        )
+        assert added == ["c1", "n1", "n2"]
