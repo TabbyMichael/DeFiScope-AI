@@ -72,6 +72,7 @@ export default function ProtocolExplorer({
   facets,
   initialError,
   basePath = "/explore",
+  fillHeight = false,
 }: {
   initialState: ExplorerState;
   initialPage: ProtocolCatalogPage | null;
@@ -79,6 +80,13 @@ export default function ProtocolExplorer({
   initialError: string | null;
   /** Route the controls write back into; the Dashboard embeds this at "/". */
   basePath?: string;
+  /**
+   * Standalone pages (the full-screen Explorer) let the table grow to fill the
+   * viewport down to the bottom margin. Embedded views (the Dashboard's
+   * "Protocols" section, which sits in a grid beside other cards) keep a fixed
+   * height so they don't stretch the surrounding layout.
+   */
+  fillHeight?: boolean;
 }) {
   const [state, setState] = useState<ExplorerState>(initialState);
   const [page, setPage] = useState<ProtocolCatalogPage | null>(initialPage);
@@ -254,11 +262,21 @@ export default function ProtocolExplorer({
         </div>
       ) : (
         <Card>
-          {/* Fixed-height, scrollable container: the box stays the same size
-              whatever the page size (25/50/100) or the row count on the last
-              page - only the list scrolls inside it. The header is sticky so the
-              column labels stay readable while scrolling. */}
-          <CardContent className="p-0 [&_[data-slot=table-container]]:h-[420px] [&_[data-slot=table-container]]:overflow-auto">
+          {/* Scrollable container. On the standalone Explorer (fillHeight) it fills
+              the remaining viewport so the table reaches the bottom margin instead of
+              stopping short; the ~350px offset is the fixed chrome above + below it
+              (app header, page title, controls, count line, pagination, paddings) and
+              the min-height floor keeps it usable on short screens. Embedded views keep
+              a fixed 420px so they don't stretch the surrounding grid. Either way only
+              the list scrolls inside, and the sticky header keeps column labels
+              readable while scrolling. */}
+          <CardContent
+            className={
+              fillHeight
+                ? "p-0 [&_[data-slot=table-container]]:h-[calc(100vh-350px)] [&_[data-slot=table-container]]:min-h-[420px] [&_[data-slot=table-container]]:overflow-auto"
+                : "p-0 [&_[data-slot=table-container]]:h-[420px] [&_[data-slot=table-container]]:overflow-auto"
+            }
+          >
             <Table>
               <TableHeader className="[&>tr>th]:sticky [&>tr>th]:top-0 [&>tr>th]:z-10 [&>tr>th]:bg-card">
                 <TableRow>
