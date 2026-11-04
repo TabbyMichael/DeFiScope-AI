@@ -54,6 +54,7 @@ async function ExplorerContent({
       initialPage={page}
       facets={facets}
       initialError={error}
+      fillHeight
     />
   );
 }

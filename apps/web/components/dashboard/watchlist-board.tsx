@@ -172,10 +172,10 @@ function SectionBoard({
 }) {
   // Highest risk first, mirroring the page's default sort so both surfaces
   // rank the same way. The full-market filter/sort/pagination lives on /watchlist.
-  // Eight rows tall: the Overview's right column is grid-stretched to match the
+  // Nine rows tall: the Overview's right column is grid-stretched to match the
   // tall protocols catalog beside it, so the card elongates to fill that space.
   const rows = useMemo(
-    () => [...protocols].sort((a, b) => num(b.risk_score) - num(a.risk_score)).slice(0, 8),
+    () => [...protocols].sort((a, b) => num(b.risk_score) - num(a.risk_score)).slice(0, 9),
     [protocols],
   );
 
