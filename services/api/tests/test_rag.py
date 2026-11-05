@@ -274,8 +274,31 @@ class TestAnswerLLM:
         assert body["temperature"] == 0.42
         # ...while the honesty guardrail stays baked into the system prompt.
         system = body["messages"][0]["content"]
-        assert "ONLY from the numbered context" in system
+        assert "numbered context blocks" in system
         assert "Never invent numbers" in system
+        # The reply stands alone: no bracketed citation numbers in the prose.
+        assert "Do NOT print bracketed citation numbers" in system
+
+    async def test_llm_request_replays_recent_history(self, http, monkeypatch):
+        s = get_settings()
+        monkeypatch.setattr(s, "openai_api_key", "sk-test", raising=False)
+        monkeypatch.setattr(s, "openai_base_url", "https://api.test/v1", raising=False)
+        svc = RagService()
+        svc.index([chunk("Real yield is the share of TVL growth backed by fees, not emissions.")])
+        history = [
+            {"role": "user", "content": "what is real yield"},
+            {"role": "assistant", "content": "fees-backed TVL growth"},
+        ]
+        with respx.mock(base_url="https://api.test/v1") as rsp:
+            route = rsp.post("/chat/completions").respond(
+                200, json={"choices": [{"message": {"content": "ok"}}]}
+            )
+            await svc.answer("and how is it measured", http, history=history)
+        body = json.loads(route.calls.last.request.content)
+        roles = [m["role"] for m in body["messages"]]
+        # system, then the replayed prior turns, then the grounded current turn.
+        assert roles == ["system", "user", "assistant", "user"]
+        assert body["messages"][1]["content"] == "what is real yield"
 
     async def test_llm_failure_degrades_to_extractive(self, http, monkeypatch):
         s = get_settings()

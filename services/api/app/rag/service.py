@@ -35,16 +35,28 @@ from app.schemas import ChatAnswer, ChatCitation
 logger = logging.getLogger(__name__)
 
 SYSTEM_PROMPT = (
-    "You are the DeFiScope analyst. Answer ONLY from the numbered context blocks "
-    "in the user message. Write a clear, engaging, well-structured explanation that "
-    "a curious analyst would enjoy reading - open with the direct answer, then walk "
-    "through the reasoning in a few short paragraphs, and close with anything the "
-    "data cannot establish. Attribute every factual claim to its source with the "
-    "bracketed number, e.g. [2]. If the context does not support part of the answer, "
-    "say plainly what cannot be established and what evidence is missing rather than "
-    "filling the gap. Never invent numbers, never use knowledge outside the context, "
-    "and never present a hypothesis as a verified fact - being engaging must never "
-    "come at the cost of honesty."
+    "You are the DeFiScope analyst, holding a flowing conversation. Ground every "
+    "answer in the numbered context blocks in the user message, and use the earlier "
+    "turns of this conversation to stay coherent (resolve follow-ups like 'why?' or "
+    "'what about that' against what was just discussed). Keep replies SHORT and "
+    "easy to understand. Structure every answer like this: first, one plain "
+    "sentence that directly answers the question; then, only when it genuinely "
+    "helps, two to four very short bullet points, each on its own new line and "
+    "each beginning with the bullet character •. Use plain, everyday language and "
+    "briefly explain any technical term the first time you use it. Prefer short "
+    "sentences. When a question has several parts, steps, or factors, split them "
+    "onto separate • lines so the answer is easy to scan rather than one dense "
+    "paragraph. Write plain text only: no markdown, no headings, no asterisks, no "
+    "backticks, no hyphen or dash bullets, and no em dashes (prefer commas and "
+    "full stops). Never paste code identifiers, file names, or paths; describe "
+    "things in plain words instead. Do NOT print bracketed "
+    "citation numbers, source labels, or a reference list in your reply; the "
+    "numbered context is for your grounding only, not for display. Never invent "
+    "numbers, never use knowledge outside the context and the conversation, and "
+    "never present a hypothesis as a verified fact. If the evidence cannot "
+    "establish part of the answer, end with one short plain sentence saying what is "
+    "missing rather than guessing. Being brief must never come at the cost of "
+    "honesty."
 )
 
 _MAX_QUOTE = 280
@@ -195,9 +207,10 @@ class RagService:
     # -- answering -----------------------------------------------------------
 
     def _extractive(self, passages: list[Chunk]) -> str:
+        # Same plain-text shape as the LLM path: a lead line then • bullets, so
+        # the degraded answer reads consistently and shows no [n] markers.
         lines = ["Here is what the indexed DeFiScope evidence supports:"]
-        for i, c in enumerate(passages):
-            lines.append(f"- [{i + 1}] {c.text}")
+        lines.extend(f"• {c.text.strip()}" for c in passages)
         return "\n".join(lines)
 
     def _refusal(self, protocol_slug: str | None) -> ChatAnswer:
@@ -222,12 +235,14 @@ class RagService:
         *,
         protocol_slug: str | None = None,
         visible_slugs: set[str] | None = None,
+        history: list[dict] | None = None,
     ) -> ChatAnswer:
         settings = get_settings()
+        rquery = self._retrieval_query(question, history)
         scored, used_vectors = await self.retrieve(
-            question, http, protocol_slug=protocol_slug, visible_slugs=visible_slugs
+            rquery, http, protocol_slug=protocol_slug, visible_slugs=visible_slugs
         )
-        supporting = self._supporting(question, scored, used_vectors)
+        supporting = self._supporting(rquery, scored, used_vectors)
         if not supporting:
             return self._refusal(protocol_slug)
         citations = self._citations(supporting)
@@ -240,7 +255,7 @@ class RagService:
                 generated_by="extractive",
             )
 
-        text = await self._complete(question, supporting, http)
+        text = await self._complete(question, supporting, http, history)
         if text is None:
             # LLM failed: degrade to the honest extractive answer, don't error.
             return ChatAnswer(
@@ -264,16 +279,18 @@ class RagService:
         *,
         protocol_slug: str | None = None,
         visible_slugs: set[str] | None = None,
+        history: list[dict] | None = None,
     ) -> AsyncIterator[dict]:
         """Yield WS frames: ``token`` deltas, then ``citations``, then ``done``.
 
         Frames are plain dicts the router serializes - keeping the transport
         concerns (socket, pings, closes) out of the reasoning core."""
         settings = get_settings()
+        rquery = self._retrieval_query(question, history)
         scored, used_vectors = await self.retrieve(
-            question, http, protocol_slug=protocol_slug, visible_slugs=visible_slugs
+            rquery, http, protocol_slug=protocol_slug, visible_slugs=visible_slugs
         )
-        supporting = self._supporting(question, scored, used_vectors)
+        supporting = self._supporting(rquery, scored, used_vectors)
         if not supporting:
             refusal = self._refusal(protocol_slug)
             yield {"type": "token", "text": refusal.answer}
@@ -287,7 +304,7 @@ class RagService:
 
         if settings.openai_api_key:
             full: list[str] = []
-            async for delta in self._stream(question, supporting, http):
+            async for delta in self._stream(question, supporting, http, history):
                 full.append(delta)
                 yield {"type": "token", "text": delta}
             text = "".join(full)
@@ -318,12 +335,49 @@ class RagService:
 
     # -- OpenAI chat (best-effort; caller has already gated on the key) ------
 
-    def _messages(self, question: str, passages: list[Chunk]) -> list[dict]:
+    def _messages(
+        self, question: str, passages: list[Chunk], history: list[dict] | None = None
+    ) -> list[dict]:
+        # system -> prior turns (for continuity) -> the grounded current question.
+        msgs: list[dict] = [{"role": "system", "content": SYSTEM_PROMPT}]
+        msgs.extend(self._trim_history(history))
         user = f"Context:\n\n{self._context_block(passages)}\n\nQuestion: {question}"
-        return [{"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": user}]
+        msgs.append({"role": "user", "content": user})
+        return msgs
+
+    def _trim_history(self, history: list[dict] | None) -> list[dict]:
+        """Keep only the most recent turns, each capped, so replaying the chat
+        cannot crowd out the freshly retrieved evidence in a small context."""
+        settings = get_settings()
+        limit = settings.rag_max_history_turns
+        if limit <= 0 or not history:
+            return []
+        cap = settings.rag_history_char_limit
+        turns: list[dict] = []
+        for t in history[-limit:]:
+            role = t.get("role")
+            content = (t.get("content") or "").strip()
+            if role in ("user", "assistant") and content:
+                turns.append({"role": role, "content": content[:cap]})
+        return turns
+
+    def _retrieval_query(self, question: str, history: list[dict] | None) -> str:
+        """A terse follow-up ('why?', 'and TVL?') carries too few terms to match
+        evidence on its own, so fold in the last user turn - the model gets the
+        same continuity, and retrieval stays grounded in the real topic."""
+        if not history or len(tokenize(question)) > 3:
+            return question
+        for t in reversed(history):
+            if t.get("role") == "user" and (t.get("content") or "").strip():
+                return f"{t['content'].strip()} {question}"
+        return question
 
     async def _complete(
-        self, question: str, passages: list[Chunk], http: httpx.AsyncClient
+        self,
+        question: str,
+        passages: list[Chunk],
+        http: httpx.AsyncClient,
+        history: list[dict] | None = None,
     ) -> str | None:
         settings = get_settings()
         try:
@@ -331,7 +385,7 @@ class RagService:
                 f"{settings.openai_base_url}/chat/completions",
                 json={
                     "model": settings.openai_model,
-                    "messages": self._messages(question, passages),
+                    "messages": self._messages(question, passages, history),
                     "temperature": settings.rag_temperature,
                     "max_tokens": settings.rag_max_tokens,
                 },
@@ -345,12 +399,16 @@ class RagService:
             return None
 
     async def _stream(
-        self, question: str, passages: list[Chunk], http: httpx.AsyncClient
+        self,
+        question: str,
+        passages: list[Chunk],
+        http: httpx.AsyncClient,
+        history: list[dict] | None = None,
     ) -> AsyncIterator[str]:
         settings = get_settings()
         payload = {
             "model": settings.openai_model,
-            "messages": self._messages(question, passages),
+            "messages": self._messages(question, passages, history),
             "temperature": settings.rag_temperature,
             "max_tokens": settings.rag_max_tokens,
             "stream": True,

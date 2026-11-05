@@ -269,6 +269,13 @@ class Settings(BaseSettings):
     # model producing a long answer can exceed the default HTTP timeout; too low
     # a value makes the app needlessly degrade to the extractive fallback.
     rag_llm_timeout_seconds: float = 150.0
+    # Conversation memory: how many prior turns (user+assistant) to replay to the
+    # model so it can hold context and progress with follow-ups like a person.
+    # Trimmed server-side to bound the context window; 0 disables continuity.
+    rag_max_history_turns: int = 6
+    # Per prior-turn character cap when replaying history, so a couple of long
+    # answers cannot crowd out the freshly retrieved evidence.
+    rag_history_char_limit: int = 700
     # Browser-reachable WebSocket base for token streaming (WS /ws/chat). Empty
     # falls back to the HTTP API public URL's host with the ws/wss scheme.
     api_ws_url: str | None = None

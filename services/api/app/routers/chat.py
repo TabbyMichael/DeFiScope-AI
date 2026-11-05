@@ -94,7 +94,11 @@ async def chat(
             )
     try:
         return await svc.answer(
-            body.question, http, protocol_slug=body.protocol_slug, visible_slugs=allowed
+            body.question,
+            http,
+            protocol_slug=body.protocol_slug,
+            visible_slugs=allowed,
+            history=[t.model_dump() for t in body.history],
         )
     except Exception as exc:  # noqa: BLE001 - a chat failure is a 502, not a crash
         logger.warning("Chat request failed: %s", type(exc).__name__)
@@ -127,6 +131,24 @@ def _socket_subject(ws: WebSocket) -> Subject | None:
     return subject
 
 
+def _sanitize_history(raw: object) -> list[dict]:
+    """Coerce a client-supplied WS ``history`` into ``[{role, content}]``.
+
+    The socket has no Pydantic body validation, so we trust-but-verify: keep only
+    string user/assistant turns with content. The service still trims length and
+    count, so a hostile or buggy client cannot inflate the model's context."""
+    if not isinstance(raw, list):
+        return []
+    turns: list[dict] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        role, content = item.get("role"), item.get("content")
+        if role in ("user", "assistant") and isinstance(content, str) and content.strip():
+            turns.append({"role": role, "content": content})
+    return turns
+
+
 @router.websocket("/ws/chat")
 async def chat_ws(ws: WebSocket):
     if not _origin_allowed(ws.headers.get("origin")):
@@ -157,6 +179,7 @@ async def chat_ws(ws: WebSocket):
                 payload = json.loads(raw)
                 question = str(payload.get("question", "")).strip()
                 protocol_slug = payload.get("protocol_slug")
+                history = _sanitize_history(payload.get("history"))
             except (json.JSONDecodeError, AttributeError):
                 async with send_lock:
                     await ws.send_json({"type": "error", "message": "invalid JSON frame"})
@@ -173,7 +196,8 @@ async def chat_ws(ws: WebSocket):
                 continue
             try:
                 async for frame in svc.answer_stream(
-                    question, http, protocol_slug=protocol_slug, visible_slugs=allowed
+                    question, http, protocol_slug=protocol_slug, visible_slugs=allowed,
+                    history=history,
                 ):
                     async with send_lock:
                         await ws.send_json(frame)

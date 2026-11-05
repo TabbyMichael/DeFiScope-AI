@@ -291,11 +291,25 @@ class TicketResponse(BaseModel):
     expires_in: int
 
 
+class ChatTurn(BaseModel):
+    """One prior turn in an ask-the-analyst conversation.
+
+    Sent by the client so the model can hold context and progress with follow-ups
+    like a person, rather than answering each question in a vacuum. The server
+    trims this to the most recent turns (see ``rag_max_history_turns``) so a long
+    chat cannot blow the model's context window."""
+
+    role: Literal["user", "assistant"]
+    content: str = Field(..., max_length=4000)
+
+
 class ChatRequest(BaseModel):
     question: str = Field(..., min_length=1, max_length=2000)
     # When set, retrieval is scoped to that protocol's own evidence first
     # (falling back to shared methodology docs). Omit for a general question.
     protocol_slug: str | None = None
+    # Prior turns of this conversation (oldest first), used for continuity.
+    history: list[ChatTurn] = Field(default_factory=list)
 
 
 class ChatCitation(BaseModel):
