@@ -10,6 +10,12 @@ import type { ChatAnswer, ChatCitation } from "@/lib/types";
 
 type Role = "user" | "assistant";
 
+/** A prior turn replayed to the server so the analyst can hold the thread. */
+interface ChatTurn {
+  role: Role;
+  content: string;
+}
+
 interface Message {
   id: number;
   role: Role;
@@ -70,6 +76,7 @@ async function fetchTicket(): Promise<string> {
 export function streamAsk(
   question: string,
   protocolSlug: string | null,
+  history: ChatTurn[],
   cb: {
     onToken: (t: string) => void;
     onCitations: (cs: ChatCitation[]) => void;
@@ -97,7 +104,7 @@ export function streamAsk(
     fetch("/api/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ question, protocol_slug: protocolSlug }),
+      body: JSON.stringify({ question, protocol_slug: protocolSlug, history }),
     })
       .then((r) => (r.ok ? (r.json() as Promise<ChatAnswer>) : Promise.reject(new Error(`HTTP ${r.status}`))))
       .then((answer) => cb.onComplete(answer, true))
@@ -139,7 +146,7 @@ export function streamAsk(
       }
     }, OPEN_TIMEOUT_MS);
 
-    ws.onopen = () => ws.send(JSON.stringify({ question, protocol_slug: protocolSlug }));
+    ws.onopen = () => ws.send(JSON.stringify({ question, protocol_slug: protocolSlug, history }));
     ws.onerror = () => {
       stopTimer();
       if (!settled) fallbackToPost();
@@ -215,21 +222,19 @@ function GeneratedBadge({ msg }: { msg: Message }) {
   return null;
 }
 
-function CitationList({ citations }: { citations: ChatCitation[] }) {
-  if (!citations.length) return null;
-  return (
-    <div className="mt-3 space-y-1.5 border-t pt-3">
-      <p className="text-xs font-medium text-muted-foreground">Sources</p>
-      {citations.map((c) => (
-        <div key={c.n} className="text-xs leading-relaxed">
-          <span className="mr-1 font-semibold text-emerald-600 dark:text-emerald-400">[{c.n}]</span>
-          <span className="font-medium">{c.source}</span>
-          {c.location ? <span className="text-muted-foreground"> · {c.location}</span> : null}
-          <p className="mt-0.5 pl-5 text-muted-foreground">{c.quote}</p>
-        </div>
-      ))}
-    </div>
-  );
+/**
+ * Tidy the analyst's reply for display. The small local model sometimes still
+ * reaches for markdown (hyphen bullets, backticks, **bold**) even though we ask
+ * for plain text and there is no markdown renderer here. This is a cheap,
+ * dependency-free presentation pass: real bullets become •, and stray markdown
+ * punctuation is dropped. Pure so it is unit-testable and safe to run on every
+ * streamed token.
+ */
+export function prettyReply(raw: string): string {
+  return raw
+    .replace(/\*\*/g, "") // **bold** -> bold
+    .replace(/`/g, "") // drop inline-code backticks
+    .replace(/(^|\n)[ \t]*[-*][ \t]+/g, "$1• "); // - / * bullets -> •
 }
 
 export function ChatPanel({
@@ -246,8 +251,11 @@ export function ChatPanel({
   const idRef = useRef(0);
   const cancelRef = useRef<(() => void) | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  // Mirror of the transcript for building the history a follow-up turn sends.
+  const messagesRef = useRef<Message[]>([]);
 
   useEffect(() => {
+    messagesRef.current = messages;
     // jsdom (tests) and some environments lack Element.scrollTo — guard it.
     scrollRef.current?.scrollTo?.({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
   }, [messages]);
@@ -262,6 +270,11 @@ export function ChatPanel({
       if (!question || busy) return;
       const userId = ++idRef.current;
       const aid = ++idRef.current;
+      // Completed prior turns (not the placeholder we're about to add) let the
+      // analyst hold the thread and answer follow-ups like a person.
+      const history: ChatTurn[] = messagesRef.current
+        .filter((m) => m.content && !m.streaming)
+        .map((m) => ({ role: m.role, content: m.content }));
       setMessages((prev) => [
         ...prev,
         { id: userId, role: "user", content: question },
@@ -269,7 +282,7 @@ export function ChatPanel({
       ]);
       setInput("");
       setBusy(true);
-      cancelRef.current = streamAsk(question, slug || null, {
+      cancelRef.current = streamAsk(question, slug || null, history, {
         onToken: (t) => update(aid, (m) => ({ ...m, content: m.content + t })),
         onCitations: (cs) => update(aid, (m) => ({ ...m, citations: cs })),
         onComplete: (answer, replace) =>
@@ -301,8 +314,8 @@ export function ChatPanel({
           <span className="mt-0.5 inline-block size-2 shrink-0 rounded-full bg-emerald-500" />
           <p>
             Answers are grounded in DeFiScope&apos;s own evidence: methodology docs and each
-            protocol&apos;s indicators, data gaps and alerts. Every claim cites a numbered source, and
-            when the data can&apos;t establish something, it says so rather than guessing.
+            protocol&apos;s indicators, data gaps and alerts. It remembers the thread, so you can ask
+            follow-ups, and when the data can&apos;t establish something it says so rather than guessing.
           </p>
         </CardContent>
       </Card>
@@ -339,12 +352,11 @@ export function ChatPanel({
                 </div>
               )}
               <p className="whitespace-pre-wrap leading-relaxed">
-                {m.content}
+                {prettyReply(m.content)}
                 {m.streaming && !m.content ? (
                   <span className="text-muted-foreground">retrieving evidence…</span>
                 ) : null}
               </p>
-              {m.citations && m.citations.length > 0 && <CitationList citations={m.citations} />}
             </div>
           </div>
         ))}

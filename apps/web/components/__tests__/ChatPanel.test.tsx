@@ -1,7 +1,7 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { ChatPanel } from "@/components/chat/chat-panel";
+import { ChatPanel, prettyReply } from "@/components/chat/chat-panel";
 
 const CITATIONS = [
   { n: 1, source: "Methodology", location: "Real yield", quote: "fees-backed growth share" },
@@ -36,13 +36,14 @@ describe("ChatPanel", () => {
     render(<ChatPanel protocols={[]} />);
     askQuestion();
 
-    // Answer text + citation source + the offline badge all surface.
+    // Answer text + the offline badge surface; the Sources list is intentionally
+    // no longer shown (the reply stands alone).
     expect(await screen.findByText(/Real yield is fees-backed growth/)).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/chat",
       expect.objectContaining({ method: "POST" }),
     );
-    expect(await screen.findByText("Methodology")).toBeInTheDocument();
+    expect(screen.queryByText("Sources")).not.toBeInTheDocument();
     expect(screen.getByText("offline · quoted evidence")).toBeInTheDocument();
   });
 
@@ -85,7 +86,7 @@ describe("ChatPanel", () => {
     askQuestion();
 
     expect(await screen.findByText(/Real yield \[1\]/)).toBeInTheDocument();
-    expect(screen.getByText("Methodology")).toBeInTheDocument();
+    expect(screen.queryByText("Sources")).not.toBeInTheDocument();
     expect(screen.getByText("model: gpt-4o-mini")).toBeInTheDocument();
     expect(fetchMock).not.toHaveBeenCalledWith("/api/chat", expect.anything());
   });
@@ -141,5 +142,18 @@ describe("ChatPanel", () => {
     // The 1008 close triggered a second connection with a fresh ticket.
     expect(opened).toHaveLength(2);
     expect(fetchMock).not.toHaveBeenCalledWith("/api/chat", expect.anything());
+  });
+});
+
+describe("prettyReply", () => {
+  it("turns hyphen/asterisk bullets into • and strips markdown punctuation", () => {
+    const raw = "Lead sentence.\n- first point\n* second point\nSee `scoring.py` for **weights**.";
+    const out = prettyReply(raw);
+    expect(out).toContain("• first point");
+    expect(out).toContain("• second point");
+    expect(out).not.toContain("- ");
+    expect(out).not.toContain("`");
+    expect(out).not.toContain("**");
+    expect(out).toContain("weights");
   });
 });

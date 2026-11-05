@@ -105,6 +105,10 @@ services:
       # Local CPU models are slow; keep the generation timeout generous so long
       # answers aren't needlessly degraded to the extractive fallback.
       DEFISCOPE_RAG_LLM_TIMEOUT_SECONDS: ${DEFISCOPE_RAG_LLM_TIMEOUT_SECONDS:-150}
+      # Conversation memory: replay the last N turns (each capped) so the analyst
+      # holds the thread and answers follow-ups like a person.
+      DEFISCOPE_RAG_MAX_HISTORY_TURNS: ${DEFISCOPE_RAG_MAX_HISTORY_TURNS:-6}
+      DEFISCOPE_RAG_HISTORY_CHAR_LIMIT: ${DEFISCOPE_RAG_HISTORY_CHAR_LIMIT:-700}
       # Relevance bar for the offline BM25 path: how many distinct informative
       # query terms a passage must share to count as supporting (not just one
       # stray common word). Raise to tighten, lower to be more permissive.
@@ -189,10 +193,24 @@ services:
     image: ollama/ollama:latest
     profiles: ["llm"]
     restart: unless-stopped
+    # Publish on an overridable host port: the api container reaches Ollama over
+    # the compose network at http://ollama:11434 regardless, so this mapping only
+    # exposes it to the host/browser. Default stays 11434; set OLLAMA_PUBLISH_PORT
+    # in .env when a host Ollama already holds that port (e.g. 11435).
     ports:
-      - "11434:11434"
+      - "${OLLAMA_PUBLISH_PORT:-11434}:11434"
     volumes:
       - ollama_data:/root/.ollama
+    environment:
+      # Free model runs CPU-only inside the Docker Desktop VM, which caps all
+      # containers at a few GB. Keep exactly one model resident, hold it warm
+      # between chats (a cold reload costs tens of seconds), and cap the context
+      # so generation stays light. open-webui competes for the same budget -
+      # start it only when you actually need the dev console.
+      OLLAMA_KEEP_ALIVE: ${OLLAMA_KEEP_ALIVE:-30m}
+      OLLAMA_MAX_LOADED_MODELS: "1"
+      OLLAMA_NUM_PARALLEL: "1"
+      OLLAMA_CONTEXT_LENGTH: ${OLLAMA_CONTEXT_LENGTH:-2048}
 
   # Internal developer console ONLY (talks straight to Ollama for prompt/model
   # tuning). It is NOT the customer-facing chat - our grounded dashboard stays.
